@@ -1,0 +1,22 @@
+{
+  "current_scene_id": "forest_edge",
+  "scenes": {
+    "forest_edge": {
+      "name": "森林边缘的空地",
+      "description": "一片被巨大古树环绕的空地,阳光透过树冠的缝隙洒落,地面覆盖着厚厚的落叶。空气中弥漫着泥土与青草的气息。",
+      "time": "黄昏",
+      "atmosphere": "宁静而神秘",
+      "present_characters": ["player"]
+    }
+  },
+  "characters": {
+    "player": {
+      "name": "主角",
+      "description": "刚刚醒来,对自己为何身处此地毫无记忆。",
+      "status": "清醒、警觉",
+      "inventory": []
+    }
+  },
+  "story_summary": "主角在一片陌生的森林空地中醒来,周围是参天的古树,完全不记得自己是如何到达这里的。",
+  "recent_beats": []
+}

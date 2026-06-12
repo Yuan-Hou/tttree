@@ -6,7 +6,8 @@
       "Bash(.venv/bin/python *)",
       "Bash(git check-ignore *)",
       "Bash(git add *)",
-      "Bash(grep -iE \"\\\\.env$|pycache|\\\\.pyc|\\\\.venv|\\\\.db\")"
+      "Bash(grep -iE \"\\\\.env$|pycache|\\\\.pyc|\\\\.venv|\\\\.db\")",
+      "Bash(PYTHONPATH=. .venv/bin/python *)"
     ]
   }
 }

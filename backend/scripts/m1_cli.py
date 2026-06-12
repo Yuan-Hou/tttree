@@ -35,8 +35,6 @@ def apply_director_output(state: WorldState, output: DirectorOutput) -> None:
         state.characters.setdefault(char_id, {}).update(delta)
 
     state.story_summary = output.story_summary_update
-    state.recent_beats.append(output.beat)
-    state.recent_beats = state.recent_beats[-5:]
 
 
 def check_must_include(narrative: str, must_include: list[str]) -> None:

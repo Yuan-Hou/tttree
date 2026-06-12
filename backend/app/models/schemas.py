@@ -32,4 +32,3 @@ class WorldState(BaseModel):
     scenes: dict[str, dict[str, Any]] = Field(default_factory=dict)
     characters: dict[str, dict[str, Any]] = Field(default_factory=dict)
     story_summary: str = ""
-    recent_beats: list[str] = Field(default_factory=list)

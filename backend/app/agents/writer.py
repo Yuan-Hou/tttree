@@ -1,14 +1,14 @@
 from collections.abc import AsyncIterator
 
-from app.agents.context import Message, build_messages
+from app.agents.context import Blackboard, Message, build_messages
 from app.config import settings
 from app.llm.deepseek_client import get_client
-from app.models.schemas import WorldState, WritingBrief
+from app.models.schemas import WritingBrief
 
 
 async def stream_writer(
     history: list[Message],
-    world_state: WorldState,
+    blackboard: Blackboard,
     user_action: str,
     writing_brief: WritingBrief,
 ) -> AsyncIterator[str]:
@@ -16,7 +16,7 @@ async def stream_writer(
     messages = build_messages(
         "writer",
         history=history,
-        world_state=world_state,
+        blackboard=blackboard,
         user_action=user_action,
         writing_brief=writing_brief,
     )

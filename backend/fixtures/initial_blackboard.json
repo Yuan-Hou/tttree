@@ -1,0 +1,31 @@
+{
+  "story_meta": {
+    "title": "林间迷踪",
+    "current_scene": "forest_edge",
+    "latest_beat": "醒于林间"
+  },
+  "scenes": {
+    "forest_edge": {
+      "name": "森林边缘的空地",
+      "base_prompt": "黄昏时分的森林边缘空地,四周巨大的古树环绕,树冠缝隙间漏下金色的余晖,地面覆满厚厚的落叶。",
+      "visual_anchors": ["参天古树", "金色夕照", "厚厚的落叶"],
+      "state": "宁静无人,空气里浮动着泥土与青草的气息。空地北侧的古树之间,立着一扇虚掩的木门。",
+      "connections": [],
+      "image_paths": []
+    }
+  },
+  "characters": {
+    "主角": {
+      "location": "forest_edge",
+      "status": "刚刚醒来,清醒而警觉,对自己为何身处此地毫无记忆",
+      "inventory": [],
+      "relations": {},
+      "appearance": "一身风尘仆仆的灰色旅人斗篷,神情中带着初醒的茫然与警惕。"
+    }
+  },
+  "items": {},
+  "notes": [
+    { "content": "主角失忆,不记得自己为何来到这片森林。", "since_beat": "醒于林间" }
+  ],
+  "removed": []
+}

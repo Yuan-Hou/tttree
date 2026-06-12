@@ -23,12 +23,4 @@ class DirectorOutput(BaseModel):
     character_updates: dict[str, dict[str, Any]] = Field(default_factory=dict)
     mood: str
     writing_brief: WritingBrief
-    story_summary_update: str
     choices: list[str] = Field(default_factory=list)
-
-
-class WorldState(BaseModel):
-    current_scene_id: str
-    scenes: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    characters: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    story_summary: str = ""

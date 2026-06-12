@@ -1,8 +1,11 @@
-"""M1 验证脚本: Director -> Writer 串行链路(共享上下文 + 缓存友好布局)。
+"""M2 三段式 CLI: 每轮 Director-A → Writer → Director-B → reducer。
 
-用法(在 backend/ 目录下):
-    python -m scripts.m1_cli                 # 交互模式
-    python -m scripts.m1_cli "推开阁楼的门"   # 单次模式
+黑板是唯一世界真相(存于 DB)。回合内顺序铁律:A、Writer、B 都看同一份「本回合之前」的
+黑板;reducer 在三次 LLM 调用全部完成后才写库。
+
+用法(backend/ 下):
+    python -m scripts.m1_cli                  # 交互模式
+    python -m scripts.m1_cli "推开那扇木门"     # 单次模式
 """
 
 import argparse
@@ -10,95 +13,114 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.agents.context import Message
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.agents.context import Blackboard, Message
 from app.agents.director import DirectorOutputError, run_director
+from app.agents.director_review import DirectorReviewError, run_director_review
 from app.agents.writer import stream_writer
-from app.models.schemas import DirectorOutput, WorldState
+from app.db.models import Blackboard as BlackboardRow
+from app.db.session import async_session, create_all, engine
+from app.state.reducer import ReducerResult, reduce_turn
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
+STORY_ID = "cli-story"
 
 
-def load_initial_state() -> WorldState:
-    data = json.loads((FIXTURES_DIR / "initial_state.json").read_text(encoding="utf-8"))
-    return WorldState.model_validate(data)
+def load_initial_blackboard() -> Blackboard:
+    return json.loads((FIXTURES_DIR / "initial_blackboard.json").read_text(encoding="utf-8"))
 
 
-def apply_director_output(state: WorldState, output: DirectorOutput) -> None:
-    """占位的朴素状态合并逻辑,M2 会替换为独立的 reducer agent。
-
-    注意:本函数只能在 Director 与 Writer **都**调用完之后执行——两个 agent 必须收到
-    逐字节相同的世界状态快照,才能命中同一回合内的前缀缓存。"""
-    state.scenes.setdefault(output.scene_id, {}).update(output.scene_delta)
-    state.current_scene_id = output.scene_id
-
-    for char_id, delta in output.character_updates.items():
-        state.characters.setdefault(char_id, {}).update(delta)
-
-    state.story_summary = output.story_summary_update
-
-
-def check_must_include(narrative: str, must_include: list[str]) -> None:
-    print("\n--- must_include 核对(逐字匹配,未命中需人工检查是否被意译落实) ---")
-    if not must_include:
-        print("(本回合 writing_brief.must_include 为空)")
-    for item in must_include:
-        mark = "✅" if item in narrative else "⚠️ "
-        print(f"{mark} {item}")
-    print("-------------------------------------------------------------")
+async def seed_if_needed(Session: async_sessionmaker, story_id: str) -> Blackboard:
+    """建表;若该 story 尚无黑板则用初始黑板播种。返回当前黑板。"""
+    await create_all(engine)
+    async with Session() as s:
+        row = await s.get(BlackboardRow, story_id)
+        if row is not None:
+            return json.loads(row.json_blob)
+        bb = load_initial_blackboard()
+        s.add(BlackboardRow(story_id=story_id, json_blob=json.dumps(bb, ensure_ascii=False)))
+        await s.commit()
+        return bb
 
 
-async def run_turn(state: WorldState, history: list[Message], user_action: str) -> None:
+async def run_turn(
+    Session: async_sessionmaker,
+    story_id: str,
+    blackboard: Blackboard,
+    history: list[Message],
+    user_action: str,
+) -> tuple[Blackboard, ReducerResult | None]:
     print(f"\n>>> 玩家行动: {user_action}\n")
 
-    # Director 与 Writer 共享同一个(本回合尚未变更的)world_state 快照。
+    # ---- Director-A:读黑板,出预案(引导 Writer + 给 B 参考,不落盘)----
     try:
-        director_output = await run_director(history, state, user_action)
+        a = await run_director(history, blackboard, user_action)
     except DirectorOutputError as exc:
-        print(f"[Director 输出异常] {exc}")
-        print(f"原始返回:\n{exc.raw}")
-        return
+        print(f"[Director-A 异常] {exc}\n原始返回:\n{exc.raw}")
+        return blackboard, None
+    print("--- Director-A 预案 ---")
+    print(f"  beat: {a.beat}")
+    print(f"  scene_event={a.scene_event}  scene_id={a.scene_id}  mood={a.mood}")
+    print(f"  brief.must_include={a.writing_brief.must_include}")
 
-    print("--- Director 输出(已解析) ---")
-    print(director_output.model_dump_json(indent=2))
-    print("--------------------------------\n")
-
-    print("--- Writer 输出(流式) ---")
+    # ---- Writer:读同一份黑板 + brief,自由创作(流式)----
+    print("\n--- Writer 叙事(流式) ---")
     chunks: list[str] = []
-    async for token in stream_writer(
-        history, state, user_action, director_output.writing_brief
-    ):
+    async for token in stream_writer(history, blackboard, user_action, a.writing_brief):
         print(token, end="", flush=True)
         chunks.append(token)
     narrative = "".join(chunks)
-    print("\n--------------------------")
+    print("\n")
 
-    check_must_include(narrative, director_output.writing_brief.must_include)
+    # ---- Director-B:读同一份黑板 + 成稿 + A 预案,全量重写新黑板 ----
+    try:
+        new_bb = await run_director_review(
+            history, blackboard, user_action, narrative, director_a_plan=a.model_dump()
+        )
+    except DirectorReviewError as exc:
+        print(f"[Director-B 异常] {exc}\n原始返回:\n{exc.raw}")
+        return blackboard, None
 
-    # 两个 agent 都跑完后:先把「干净」消息追加进历史,再合并世界状态。
+    # ---- reducer:三次 LLM 调用都完成后,才解析校验 + 写库 ----
+    async with Session() as s:
+        result = await reduce_turn(
+            story_id=story_id,
+            director_b_new_blackboard_str=json.dumps(new_bb, ensure_ascii=False),
+            writer_narrative=narrative,
+            director_a_json=a.model_dump_json(),
+            user_input=user_action,
+            session=s,
+        )
+
+    tag = f"  告警 {len(result.warnings)} 条" if result.warnings else ""
+    print(f"--- reducer: turn #{result.turn_index} 「{result.beat_title}」{tag} ---")
+
+    # 历史只追加「干净」消息(玩家输入 + 叙事),黑板不进历史
     history.append({"role": "user", "content": user_action})
     history.append({"role": "assistant", "content": narrative})
-    apply_director_output(state, director_output)
 
-    if director_output.choices:
-        print("\n建议的下一步行动:")
-        for choice in director_output.choices:
-            print(f"  - {choice}")
+    if a.choices:
+        print("建议下一步:" + "  |  ".join(a.choices))
+
+    return result.blackboard, result
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="M1 Director/Writer 验证脚本")
-    parser.add_argument("action", nargs="?", help="玩家行动(留空则进入交互模式)")
+    parser = argparse.ArgumentParser(description="M2 三段式 CLI")
+    parser.add_argument("action", nargs="?", help="玩家行动(留空进入交互模式)")
     args = parser.parse_args()
 
-    state = load_initial_state()
+    Session = async_session
+    blackboard = await seed_if_needed(Session, STORY_ID)
     history: list[Message] = []
 
     if args.action:
-        await run_turn(state, history, args.action)
+        await run_turn(Session, STORY_ID, blackboard, history, args.action)
         return
 
-    print("交互模式,输入 'quit' 或按 Ctrl-D 退出。\n")
-    print(f"开场: {state.story_summary}\n")
+    print("交互模式,输入 'quit' 或 Ctrl-D 退出。\n")
+    print(f"开场:{blackboard['story_meta']['title']} —— {blackboard['scenes'][blackboard['story_meta']['current_scene']]['state']}\n")
     while True:
         try:
             user_action = input("你的行动> ").strip()
@@ -108,7 +130,7 @@ async def main() -> None:
             continue
         if user_action.lower() in {"quit", "exit"}:
             break
-        await run_turn(state, history, user_action)
+        blackboard, _ = await run_turn(Session, STORY_ID, blackboard, history, user_action)
 
 
 if __name__ == "__main__":

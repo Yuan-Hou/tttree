@@ -195,6 +195,39 @@ async def test_removed_stripped_before_persist(tmp_path):
     print("\n[strip-removed] removed 不入库;下一轮黑板不携带上轮 removed;raw 信号仍可审计。")
 
 
+async def test_draw_proposals_returned_but_not_persisted(tmp_path):
+    """B 输出 draw_proposals → reducer 返回它(交人在回路),但剥离出持久黑板。"""
+    engine, Session = await _setup(tmp_path, seed_bb=OLD_BB)
+    with_props = json.loads(json.dumps(NEW_BB_1))
+    with_props["draw_proposals"] = [
+        {"scene_slug": "hidden_cabin", "kind": "new_scene", "reason": "首次进入木屋,值得配图"}
+    ]
+
+    async with Session() as s:
+        r = await reduce_turn(
+            story_id=STORY,
+            director_b_new_blackboard_str=json.dumps(with_props, ensure_ascii=False),
+            writer_narrative="……",
+            director_a_json="{}",
+            user_input="进入木屋",
+            session=s,
+        )
+
+    # 返回给人在回路
+    assert len(r.draw_proposals) == 1
+    assert r.draw_proposals[0]["scene_slug"] == "hidden_cabin"
+    # 不进持久黑板,也不在返回的权威黑板里
+    assert "draw_proposals" not in r.blackboard
+    async with Session() as s:
+        bb = json.loads((await s.get(Blackboard, STORY)).json_blob)
+        assert "draw_proposals" not in bb
+        # 但 raw 输出仍可审计
+        turn = (await s.execute(select(Turn).where(Turn.story_id == STORY))).scalar_one()
+        assert "draw_proposals" in json.loads(turn.director_b_json)
+    await engine.dispose()
+    print("\n[draw_proposals] 返回人在回路、剥离出持久黑板、raw 可审计。")
+
+
 async def test_inconsistency_warnings(tmp_path, capsys):
     engine, Session = await _setup(tmp_path, seed_bb=OLD_BB)
     # 故意制造:旅人 inventory 含「铜钥匙」但 owner 仍是 scene;location 指向不存在的场景

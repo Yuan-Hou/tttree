@@ -21,6 +21,7 @@ from app.agents.director_review import DirectorReviewError, run_director_review
 from app.agents.writer import stream_writer
 from app.db.models import Blackboard as BlackboardRow
 from app.db.session import async_session, create_all, engine
+from app.imaging.draw_service import interactive_draw_session
 from app.state.reducer import ReducerResult, reduce_turn
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
@@ -103,6 +104,16 @@ async def run_turn(
     if a.choices:
         print("建议下一步:" + "  |  ".join(a.choices))
 
+    # ---- 入口一:Director-B 提案 → 人在回路出图(逐张确认;提案不进黑板,reducer 已剥离)----
+    for prop in result.draw_proposals:
+        scene = prop.get("scene_slug", "")
+        print(f"\n[Director-B 出图提案] 场景={scene} kind建议={prop.get('kind')}  理由:{prop.get('reason')}")
+        req = f"为场景 {scene} 配图。Director-B 的建议:{prop.get('kind')} —— {prop.get('reason')}"
+        await interactive_draw_session(
+            Session, story_id=story_id, blackboard=result.blackboard, scene_slug=scene,
+            draw_request=req, origin="director_b_proposal", source_turn=result.turn_index,
+        )
+
     return result.blackboard, result
 
 
@@ -119,7 +130,7 @@ async def main() -> None:
         await run_turn(Session, STORY_ID, blackboard, history, args.action)
         return
 
-    print("交互模式,输入 'quit' 或 Ctrl-D 退出。\n")
+    print("交互模式,输入 'quit' 退出;输入 'draw <场景slug>' 主动发起出图。\n")
     print(f"开场:{blackboard['story_meta']['title']} —— {blackboard['scenes'][blackboard['story_meta']['current_scene']]['state']}\n")
     while True:
         try:
@@ -130,6 +141,15 @@ async def main() -> None:
             continue
         if user_action.lower() in {"quit", "exit"}:
             break
+        # ---- 入口二:用户主动发起出图,无需 B 提议(同一确认门,逐张确认)----
+        if user_action.lower().startswith("draw "):
+            scene = user_action[5:].strip()
+            req = f"用户主动要求为场景 {scene} 配图,定格其当前画面。"
+            await interactive_draw_session(
+                Session, story_id=STORY_ID, blackboard=blackboard, scene_slug=scene,
+                draw_request=req, origin="user_initiated",
+            )
+            continue
         blackboard, _ = await run_turn(Session, STORY_ID, blackboard, history, user_action)
 
 

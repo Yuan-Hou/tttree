@@ -1,0 +1,35 @@
+{
+  "story_meta": {
+    "title": "薄暮教室",
+    "current_scene": "old_classroom",
+    "latest_beat": "黄昏对峙"
+  },
+  "scenes": {
+    "old_classroom": {
+      "name": "废弃的旧教室",
+      "base_prompt": "黄昏时分一间废弃的旧教室,翻倒的课桌椅,积灰的黑板,夕照从破碎的窗斜射进来。",
+      "visual_anchors": ["破碎的窗户", "积灰的旧黑板", "翻倒的课桌椅"],
+      "state": "夕照穿过破窗,尘埃在光柱里浮动;教室中央,两人正面对面僵立,空气紧绷。",
+      "connections": [],
+      "image_paths": []
+    }
+  },
+  "characters": {
+    "爱丽丝": {
+      "location": "old_classroom",
+      "status": "背着巨大的白色武器,神情认真而执拗,不肯退让",
+      "inventory": [],
+      "relations": { "优香": "同伴,但此刻意见相左" },
+      "appearance": "深蓝渐变长发,蓝色眼睛,白黑蓝配色的学生制服外套,头顶青绿色方形光环,背着巨大的白色科幻武器"
+    },
+    "优香": {
+      "location": "old_classroom",
+      "status": "双臂抱胸,眉头紧蹙,语气冷静却带着不满",
+      "inventory": [],
+      "relations": { "爱丽丝": "同伴,正试图劝阻她" },
+      "appearance": "深紫色长发双马尾,蓝紫色眼睛,黑色西装式制服与白衬衫、蓝色领带,头顶蓝色光环"
+    }
+  },
+  "items": {},
+  "notes": []
+}

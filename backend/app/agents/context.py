@@ -23,7 +23,7 @@ from typing import Any, Literal
 from app.agents.loader import load_prompt
 from app.models.schemas import WritingBrief
 
-AgentRole = Literal["director", "writer", "director_review"]
+AgentRole = Literal["director", "writer", "director_review", "illustrator"]
 
 Message = dict[str, str]
 Blackboard = dict[str, Any]
@@ -32,6 +32,7 @@ STYLE_BIBLE = load_prompt("style_bible.md")
 DIRECTOR_TASK = load_prompt("director_task.md")
 WRITER_TASK = load_prompt("writer_task.md")
 DIRECTOR_REVIEW_TASK = load_prompt("director_review_task.md")
+ILLUSTRATOR_TASK = load_prompt("illustrator_task.md")
 
 
 def _render_blackboard(blackboard: Blackboard) -> str:
@@ -83,27 +84,45 @@ def build_messages(
     writing_brief: WritingBrief | None = None,
     narrative: str | None = None,
     director_a_plan: dict[str, Any] | None = None,
+    visual_style: str | None = None,
+    reference_catalog: str | None = None,
 ) -> list[Message]:
     """构造发送给 DeepSeek 的 messages。
 
     history 必须是「干净」的历史(user=玩家输入, assistant=叙事),调用方在三个 agent
     全部跑完之后再追加本轮记录,且追加的是干净消息(不含黑板/任务指令)。
+
+    缓存铁律:system + history 前缀对所有 agent 完全一致;黑板及其后的内容是易变区
+    (本就不缓存),因此 illustrator 在易变区追加「画风圣经 + 参考图库清单」不影响
+    system/history 的前缀命中。叙事三 agent 的易变区构造与 M2 逐字节一致,绝不改动。
     """
     messages: list[Message] = [{"role": "system", "content": STYLE_BIBLE}]
     messages.extend(history)
 
-    # 易变区:黑板 -> 玩家输入 -> 任务指令(顺序固定,位置同 M1)
-    tail = "\n\n".join(
-        [
-            _render_blackboard(blackboard),
-            f"【本轮玩家行动】\n{user_action}",
-            _task_tail(
-                agent_role,
-                writing_brief=writing_brief,
-                narrative=narrative,
-                director_a_plan=director_a_plan,
-            ),
-        ]
-    )
+    if agent_role == "illustrator":
+        # 易变区:黑板 -> 画风圣经 -> 参考图库清单 -> 本轮绘图请求 -> 任务
+        tail = "\n\n".join(
+            [
+                _render_blackboard(blackboard),
+                f"【画风圣经】\n{visual_style or ''}",
+                f"【参考图库清单】\n{reference_catalog or '(空)'}",
+                f"【本轮绘图请求】\n{user_action}",
+                f"【任务】\n{ILLUSTRATOR_TASK}",
+            ]
+        )
+    else:
+        # 易变区:黑板 -> 玩家输入 -> 任务指令(顺序固定,位置同 M1/M2,逐字节不变)
+        tail = "\n\n".join(
+            [
+                _render_blackboard(blackboard),
+                f"【本轮玩家行动】\n{user_action}",
+                _task_tail(
+                    agent_role,
+                    writing_brief=writing_brief,
+                    narrative=narrative,
+                    director_a_plan=director_a_plan,
+                ),
+            ]
+        )
     messages.append({"role": "user", "content": tail})
     return messages

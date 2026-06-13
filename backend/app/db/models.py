@@ -37,3 +37,40 @@ class Turn(Base):
     director_b_json: Mapped[str] = mapped_column(Text, default="")
     blackboard_after: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class ReferenceAsset(Base):
+    """用户提供的参考图库。绘图 Agent 靠 label/description 判断何时引用某张图,
+    以在无 seed 的情况下锚定角色形象/物品造型的跨图一致性。"""
+
+    __tablename__ = "reference_assets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    story_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)  # 语义名,如「主角立绘」
+    description: Mapped[str] = mapped_column(Text, default="")  # 供 Agent 判断何时用此图
+    category: Mapped[str] = mapped_column(String, default="其他")  # 角色/物品/场景氛围/其他
+    file_path: Mapped[str] = mapped_column(String, nullable=False)  # 相对 backend 根
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class ImageGen(Base):
+    """每次出图的完整记录。与黑板 image_paths 分层:黑板存「该场景当前有哪些图」简表,
+    本表存每次生成的完整出处(用了哪些参考图、最终提示词、来源入口等)。"""
+
+    __tablename__ = "image_gens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    story_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    scene_slug: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # new_scene/variant/reuse
+    final_prompt: Mapped[str] = mapped_column(Text, default="")  # 用户最终确认的提示词
+    ref_asset_ids: Mapped[str] = mapped_column(Text, default="[]")  # JSON: 参考库图 id
+    ref_image_paths: Mapped[str] = mapped_column(Text, default="[]")  # JSON: 历史生成图路径
+    output_path: Mapped[str] = mapped_column(String, default="")  # 相对 backend 根
+    origin: Mapped[str] = mapped_column(String, default="")  # director_b_proposal/user_initiated
+    source_turn: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

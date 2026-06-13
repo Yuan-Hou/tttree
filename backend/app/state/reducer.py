@@ -25,6 +25,8 @@ class ReducerResult:
     blackboard: Blackboard_t  # 本轮结束后的权威黑板(成功为新黑板,失败为保留的旧黑板)
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
+    # B 的出图建议(本回合信号,已从持久黑板剥离;交人在回路定夺)
+    draw_proposals: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _check_warnings(old_bb: Blackboard_t, new_bb: Blackboard_t) -> list[str]:
@@ -108,9 +110,13 @@ async def reduce_turn(
     for w in warnings:
         print(f"[reducer][WARN] {w}")
 
-    # 3) 剥离 removed:它是「本轮删除信号」,告警/对照用完即丢,不进入持久化的黑板状态,
-    #    以免下一轮 B 在【当前黑板】里看到上轮的 removed。raw 输出仍存于 Turn.director_b_json 备查。
+    # 3) 剥离本回合信号字段:removed(删除信号)与 draw_proposals(出图建议)都不属于
+    #    持久世界状态,告警/对照/转交人在回路后即从黑板剥离,以免下一轮 B 在【当前黑板】
+    #    里看到上轮的它们。raw 输出仍存于 Turn.director_b_json 备查。
+    draw_proposals = new_bb.get("draw_proposals")
+    draw_proposals = draw_proposals if isinstance(draw_proposals, list) else []
     new_bb.pop("removed", None)
+    new_bb.pop("draw_proposals", None)
 
     # 4) 覆盖写 Blackboard(整存,存规范化后的 JSON)
     canonical = json.dumps(new_bb, ensure_ascii=False)
@@ -142,4 +148,5 @@ async def reduce_turn(
         beat_title=beat_title,
         blackboard=new_bb,
         warnings=warnings,
+        draw_proposals=draw_proposals,
     )

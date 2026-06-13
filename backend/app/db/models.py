@@ -10,6 +10,19 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Story(Base):
+    """故事档案。数据层早带 story_id,这里把它显式建档以支持多故事管理。"""
+
+    __tablename__ = "stories"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # story_id
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    last_active_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class Blackboard(Base):
     """当前黑板的最新状态,每个 story 一行,整存整取。"""
 

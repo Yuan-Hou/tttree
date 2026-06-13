@@ -21,15 +21,19 @@ async def run_director(
     blackboard: Blackboard,
     user_action: str,
     knowledge: str = "",
+    messages: list[Message] | None = None,
 ) -> DirectorOutput:
     client = get_client()
-    messages = build_messages(
-        "director",
-        history=history,
-        blackboard=blackboard,
-        user_action=user_action,
-        knowledge=knowledge,
-    )
+    # messages 由调用方预构造时直接复用(为了把「真正喂给 LLM 的完整 messages」原样存档,
+    # M4.5-B)。不传则照常自行构造。build_messages 逻辑与缓存不受影响。
+    if messages is None:
+        messages = build_messages(
+            "director",
+            history=history,
+            blackboard=blackboard,
+            user_action=user_action,
+            knowledge=knowledge,
+        )
 
     response = await client.chat.completions.create(
         model=settings.deepseek_model,

@@ -20,6 +20,7 @@ async def run_director_review(
     user_action: str,
     narrative: str,
     director_a_plan: dict[str, Any] | None = None,
+    messages: list[Message] | None = None,
 ) -> Blackboard:
     """读当前黑板 + Writer 本轮成稿(+ A 预案),全量重写出新黑板。
 
@@ -27,14 +28,16 @@ async def run_director_review(
     的 JSON,不做语义校验——那是 reducer 的职责。
     """
     client = get_client()
-    messages = build_messages(
-        "director_review",
-        history=history,
-        blackboard=blackboard,
-        user_action=user_action,
-        narrative=narrative,
-        director_a_plan=director_a_plan,
-    )
+    # 调用方预构造时直接复用(供 M4.5-B 原样存档真正喂给 LLM 的 messages);不传则照常构造。
+    if messages is None:
+        messages = build_messages(
+            "director_review",
+            history=history,
+            blackboard=blackboard,
+            user_action=user_action,
+            narrative=narrative,
+            director_a_plan=director_a_plan,
+        )
 
     response = await client.chat.completions.create(
         model=settings.deepseek_model,

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.agents.context import Blackboard, Message
+from app.agents.context import Blackboard, Message, build_messages
 from app.agents.director import DirectorOutputError, run_director
 from app.agents.director_review import DirectorReviewError, run_director_review
 from app.agents.writer import stream_writer
@@ -58,9 +58,13 @@ async def run_turn(
     async with Session() as s:
         knowledge = await get_knowledge(s, story_id)  # 仅注入 Director-A 的设定底座
 
+    # 三次调用的完整 messages 各构造一次,既喂 LLM、又原样存档(M4.5-B);build_messages 与缓存不受影响
     # ---- Director-A:读黑板 + 设定参考,出预案(引导 Writer + 给 B 参考,不落盘)----
+    a_messages = build_messages(
+        "director", history=history, blackboard=blackboard, user_action=user_action, knowledge=knowledge
+    )
     try:
-        a = await run_director(history, blackboard, user_action, knowledge=knowledge)
+        a = await run_director(history, blackboard, user_action, knowledge=knowledge, messages=a_messages)
     except DirectorOutputError as exc:
         print(f"[Director-A 异常] {exc}\n原始返回:\n{exc.raw}")
         return blackboard, None
@@ -72,17 +76,24 @@ async def run_turn(
 
     # ---- Writer:读同一份黑板 + brief,自由创作(流式)----
     print("\n--- Writer 叙事(流式) ---")
+    w_messages = build_messages(
+        "writer", history=history, blackboard=blackboard, user_action=user_action, writing_brief=a.writing_brief
+    )
     chunks: list[str] = []
-    async for token in stream_writer(history, blackboard, user_action, a.writing_brief):
+    async for token in stream_writer(history, blackboard, user_action, a.writing_brief, messages=w_messages):
         print(token, end="", flush=True)
         chunks.append(token)
     narrative = "".join(chunks)
     print("\n")
 
     # ---- Director-B:读同一份黑板 + 成稿 + A 预案,全量重写新黑板 ----
+    b_messages = build_messages(
+        "director_review", history=history, blackboard=blackboard, user_action=user_action,
+        narrative=narrative, director_a_plan=a.model_dump(),
+    )
     try:
         new_bb = await run_director_review(
-            history, blackboard, user_action, narrative, director_a_plan=a.model_dump()
+            history, blackboard, user_action, narrative, director_a_plan=a.model_dump(), messages=b_messages
         )
     except DirectorReviewError as exc:
         print(f"[Director-B 异常] {exc}\n原始返回:\n{exc.raw}")
@@ -97,6 +108,9 @@ async def run_turn(
             director_a_json=a.model_dump_json(),
             user_input=user_action,
             session=s,
+            director_a_messages=json.dumps(a_messages, ensure_ascii=False),
+            writer_messages=json.dumps(w_messages, ensure_ascii=False),
+            director_b_messages=json.dumps(b_messages, ensure_ascii=False),
         )
 
     tag = f"  告警 {len(result.warnings)} 条" if result.warnings else ""

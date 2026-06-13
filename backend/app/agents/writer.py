@@ -10,15 +10,18 @@ async def stream_writer(
     blackboard: Blackboard,
     user_action: str,
     writing_brief: str,
+    messages: list[Message] | None = None,
 ) -> AsyncIterator[str]:
     client = get_client()
-    messages = build_messages(
-        "writer",
-        history=history,
-        blackboard=blackboard,
-        user_action=user_action,
-        writing_brief=writing_brief,
-    )
+    # 调用方预构造时直接复用(供 M4.5-B 原样存档真正喂给 LLM 的 messages);不传则照常构造。
+    if messages is None:
+        messages = build_messages(
+            "writer",
+            history=history,
+            blackboard=blackboard,
+            user_action=user_action,
+            writing_brief=writing_brief,
+        )
 
     stream = await client.chat.completions.create(
         model=settings.deepseek_model,

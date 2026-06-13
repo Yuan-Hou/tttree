@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.agents.context import Message
+from app.agents.context import Message, build_messages
 from app.agents.director import DirectorOutputError, run_director
 from app.agents.director_review import DirectorReviewError, run_director_review
 from app.agents.writer import stream_writer
@@ -65,9 +65,15 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         ).scalar() or 0
     next_idx = last_idx + 1
 
+    # 三次调用的完整 messages 各构造一次,既喂给 LLM、又原样存档(M4.5-B)。
+    # 用 build_messages 预构造后传给 agent 复用 → 存下的就是真正喂进去的那份,零偏差;
+    # build_messages 逻辑/缓存不受影响(只是多存一份)。回合内顺序约束不变。
     # ---- Director-A(读黑板 + 设定参考)----
+    a_messages = build_messages(
+        "director", history=history, blackboard=blackboard, user_action=user_input, knowledge=knowledge
+    )
     try:
-        a = await run_director(history, blackboard, user_input, knowledge=knowledge)
+        a = await run_director(history, blackboard, user_input, knowledge=knowledge, messages=a_messages)
     except DirectorOutputError as exc:
         yield sse({"type": "error", "reason": f"director-a: {exc}"})
         return
@@ -75,17 +81,24 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
     yield sse({"type": "turn_started", "turn_index": next_idx})
 
     # ---- Writer(逐 token 推)----
+    w_messages = build_messages(
+        "writer", history=history, blackboard=blackboard, user_action=user_input, writing_brief=a.writing_brief
+    )
     chunks: list[str] = []
-    async for tok in stream_writer(history, blackboard, user_input, a.writing_brief):
+    async for tok in stream_writer(history, blackboard, user_input, a.writing_brief, messages=w_messages):
         chunks.append(tok)
         yield sse({"type": "narrative_token", "text": tok})
     narrative = "".join(chunks)
     yield sse({"type": "narrative_done", "full_narrative": narrative})
 
     # ---- Director-B ----
+    b_messages = build_messages(
+        "director_review", history=history, blackboard=blackboard, user_action=user_input,
+        narrative=narrative, director_a_plan=a.model_dump(),
+    )
     try:
         new_bb = await run_director_review(
-            history, blackboard, user_input, narrative, director_a_plan=a.model_dump()
+            history, blackboard, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages
         )
     except DirectorReviewError as exc:
         yield sse({"type": "error", "reason": f"director-b: {exc}"})
@@ -100,6 +113,9 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
             director_a_json=a.model_dump_json(),
             user_input=user_input,
             session=s,
+            director_a_messages=json.dumps(a_messages, ensure_ascii=False),
+            writer_messages=json.dumps(w_messages, ensure_ascii=False),
+            director_b_messages=json.dumps(b_messages, ensure_ascii=False),
         )
         await touch_story(s, story_id)
 

@@ -66,6 +66,13 @@ class Turn(Base):
     director_a_json: Mapped[str] = mapped_column(Text, default="")
     director_b_json: Mapped[str] = mapped_column(Text, default="")
     blackboard_after: Mapped[str] = mapped_column(Text, default="")
+    # M4.5-B: 该轮三次 LLM 调用各自喂进去的「完整 messages 数组」(JSON 序列化, 原样持久化)。
+    # 用途: React Flow 点节点看完整上下文、回退/重试复用历史。算完即弃 → 改为落盘。
+    # 注意: 存储随轮数线性×每轮历史增长(整体≈平方);清理钩子见 app/turns/step_contexts.py
+    # 的 prune_step_contexts(清理策略待定,本步只留钩子)。
+    director_a_messages: Mapped[str] = mapped_column(Text, default="")
+    writer_messages: Mapped[str] = mapped_column(Text, default="")
+    director_b_messages: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 

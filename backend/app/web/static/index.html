@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vore-tree · M4 极简测试页</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background:#1b1d22; color:#ddd; }
+  h2,h3 { margin:.4em 0; }
+  #wrap { display:grid; grid-template-columns: 240px 1fr 360px; gap:0; height:100vh; }
+  .col { overflow:auto; padding:12px; box-sizing:border-box; }
+  #stories { background:#23262d; border-right:1px solid #333; }
+  #center  { background:#1b1d22; }
+  #side    { background:#23262d; border-left:1px solid #333; }
+  button { background:#3a3f4b; color:#eee; border:1px solid #555; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:13px; }
+  button:hover { background:#4a505e; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  input, textarea { background:#15171b; color:#eee; border:1px solid #444; border-radius:4px; padding:6px; font-size:13px; box-sizing:border-box; }
+  .story-item { display:flex; gap:4px; align-items:center; margin:4px 0; padding:4px; border-radius:4px; }
+  .story-item.active { background:#2f3744; outline:1px solid #5a708f; }
+  .story-item span { flex:1; cursor:pointer; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .turn { border-left:3px solid #44506a; padding:6px 10px; margin:10px 0; background:#202329; border-radius:4px; }
+  .turn .uin { color:#7fa8d8; font-size:12px; margin-bottom:4px; }
+  .turn .narr { white-space:pre-wrap; line-height:1.6; }
+  .cursor::after { content:'▋'; color:#7fa8d8; animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .scene { border:1px solid #333; border-radius:6px; padding:8px; margin:8px 0; background:#202329; }
+  .scene img { max-width:100%; border-radius:4px; display:block; margin:6px 0; }
+  .ph { border:1px dashed #6a7a55; color:#c7d89a; padding:18px; text-align:center; border-radius:4px; margin:6px 0; background:#262a20; }
+  .ph.fail { border-color:#8a4a4a; color:#e0a0a0; background:#2a2020; }
+  .draft { border:1px solid #6a5a8a; border-radius:6px; padding:10px; margin:8px 0; background:#26222e; }
+  .draft textarea { width:100%; height:120px; }
+  .ref { display:inline-block; margin:4px; text-align:center; font-size:11px; color:#bb;}
+  .ref img { width:80px; height:54px; object-fit:cover; border-radius:3px; border:1px solid #555; }
+  .badge { display:inline-block; background:#5a708f; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; margin-left:6px; }
+  .small { font-size:12px; color:#999; }
+  .row { display:flex; gap:6px; margin:6px 0; }
+  .row input { flex:1; }
+  kbd { background:#333; border-radius:3px; padding:1px 4px; font-size:11px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <!-- 故事档案 -->
+  <div id="stories" class="col">
+    <h2>故事档案</h2>
+    <div class="row">
+      <input id="newTitle" placeholder="新故事标题">
+      <button onclick="createStory()">+</button>
+    </div>
+    <div id="storyList"></div>
+  </div>
+
+  <!-- 中栏:叙事流 + 回合输入 -->
+  <div id="center" class="col">
+    <h2 id="curTitle">未选择故事</h2>
+    <div id="narrative"></div>
+    <div class="row" style="position:sticky; bottom:0; background:#1b1d22; padding-top:8px;">
+      <input id="userInput" placeholder="输入行动,回车推进剧情(出图时此处不锁死)" onkeydown="if(event.key==='Enter')submitTurn()">
+      <button id="sendBtn" onclick="submitTurn()">推进</button>
+    </div>
+    <div class="small">提示:发起出图后可立刻在此继续推进剧情,文本线不被图片线阻塞。</div>
+  </div>
+
+  <!-- 右栏:状态面板 + 场景图 + 绘图审阅 -->
+  <div id="side" class="col">
+    <h3>状态面板</h3>
+    <div id="statePanel" class="small">—</div>
+    <h3>场景与配图</h3>
+    <div id="scenes"></div>
+    <h3>绘图审阅</h3>
+    <div id="drafts"></div>
+  </div>
+</div>
+
+<script>
+let CUR = null;            // 当前 story_id
+let lastBlackboard = {};   // 最近一次黑板
+
+const $ = id => document.getElementById(id);
+const api = (p) => p;      // 同源
+const imgUrl = (rel) => '/' + rel;  // image_path 形如 storage/images/x.png
+
+// ---------- 通用 SSE(fetch + ReadableStream,支持 POST)----------
+async function streamSSE(url, body, onEvent) {
+  const resp = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, {stream:true});
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+      const line = frame.split('\n').find(l => l.startsWith('data: '));
+      if (line) onEvent(JSON.parse(line.slice(6)));
+    }
+  }
+}
+
+// ---------- 故事档案 ----------
+async function loadStories() {
+  const list = await (await fetch(api('/stories'))).json();
+  const box = $('storyList'); box.innerHTML = '';
+  list.forEach(s => {
+    const d = document.createElement('div');
+    d.className = 'story-item' + (s.id === CUR ? ' active' : '');
+    d.innerHTML = `<span title="${s.id}">${s.title} <span class="small">(${s.turn_count})</span></span>`;
+    d.querySelector('span').onclick = () => selectStory(s.id);
+    const del = document.createElement('button');
+    del.textContent = '✕';
+    del.onclick = async (e) => { e.stopPropagation(); if(confirm('删除「'+s.title+'」?')){ await fetch(api('/stories/'+s.id),{method:'DELETE'}); if(CUR===s.id){CUR=null; clearStory();} loadStories(); } };
+    d.appendChild(del);
+    box.appendChild(d);
+  });
+}
+async function createStory() {
+  const title = $('newTitle').value.trim(); if(!title) return;
+  const s = await (await fetch(api('/stories'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})})).json();
+  $('newTitle').value = '';
+  await loadStories(); selectStory(s.id);
+}
+function clearStory(){ $('curTitle').textContent='未选择故事'; $('narrative').innerHTML=''; $('statePanel').innerHTML='—'; $('scenes').innerHTML=''; $('drafts').innerHTML=''; }
+
+// ---------- 加载快照(刷新恢复)----------
+async function selectStory(id) {
+  CUR = id; loadStories();
+  const snap = await (await fetch(api('/story/'+id+'/snapshot'))).json();
+  $('curTitle').textContent = snap.title;
+  lastBlackboard = snap.blackboard || {};
+  // 历史叙事
+  const nb = $('narrative'); nb.innerHTML = '';
+  (snap.history || []).forEach(t => {
+    const div = document.createElement('div'); div.className='turn';
+    div.innerHTML = `<div class="uin">▶ ${escapeHtml(t.user_input)} <span class="badge">${t.beat_title||''}</span></div><div class="narr">${escapeHtml(t.narrative)}</div>`;
+    nb.appendChild(div);
+  });
+  renderState(); renderScenes(snap.scenes_images || {});
+  nb.scrollTop = nb.scrollHeight;
+}
+
+// ---------- 回合推进(文本线 SSE)----------
+async function submitTurn() {
+  if (!CUR) { alert('先选/建一个故事'); return; }
+  const inp = $('userInput'); const text = inp.value.trim(); if(!text) return;
+  inp.value = '';
+  const div = document.createElement('div'); div.className='turn';
+  div.innerHTML = `<div class="uin">▶ ${escapeHtml(text)}</div><div class="narr cursor"></div>`;
+  $('narrative').appendChild(div);
+  const narr = div.querySelector('.narr');
+  div.scrollIntoView({behavior:'smooth', block:'end'});
+  try {
+    await streamSSE(api('/story/'+CUR+'/turn'), {user_input:text}, ev => {
+      if (ev.type === 'narrative_token') { narr.textContent += ev.text; narr.scrollIntoView({block:'end'}); }
+      else if (ev.type === 'narrative_done') { narr.classList.remove('cursor'); }
+      else if (ev.type === 'state_updated') { lastBlackboard = ev.blackboard; div.querySelector('.uin').innerHTML += ` <span class="badge">${ev.beat_title||''}</span>`; renderState(); renderScenes(scenesImagesFromBB()); }
+      else if (ev.type === 'draw_proposed') { renderProposals(ev.proposals); }
+      else if (ev.type === 'turn_done') { loadStories(); }
+      else if (ev.type === 'error') { narr.classList.remove('cursor'); narr.innerHTML += `\n<span style="color:#e0a0a0">[错误] ${escapeHtml(ev.reason)}</span>`; }
+    });
+  } catch(e) { narr.classList.remove('cursor'); narr.textContent += '\n[流中断] '+e; }
+}
+
+function scenesImagesFromBB(){ const out={}; const sc=(lastBlackboard.scenes)||{}; for(const k in sc) out[k]=sc[k].image_paths||[]; return out; }
+
+// ---------- 状态面板 ----------
+function renderState() {
+  const bb = lastBlackboard || {};
+  const meta = bb.story_meta || {};
+  const lines = [];
+  lines.push(`<b>当前场景</b>: ${meta.current_scene||'—'}`);
+  const chars = bb.characters || {};
+  lines.push(`<b>角色</b>: ` + (Object.keys(chars).length ? Object.entries(chars).map(([n,c])=>`${n}@${c.location||'?'}(${c.status||''})`).join('; ') : '—'));
+  const items = bb.items || {};
+  lines.push(`<b>物品</b>: ` + (Object.keys(items).length ? Object.entries(items).map(([n,it])=>`${n}→${it.owner||'?'}`).join('; ') : '—'));
+  const notes = bb.notes || [];
+  lines.push(`<b>notes</b>: ` + (notes.length ? notes.map(n=>n.content).join(' / ') : '—'));
+  $('statePanel').innerHTML = lines.join('<br>');
+}
+
+// ---------- 场景与配图 ----------
+function renderScenes(scenesImages) {
+  const box = $('scenes'); box.innerHTML='';
+  const sc = (lastBlackboard.scenes)||{};
+  const slugs = new Set([...Object.keys(sc), ...Object.keys(scenesImages||{})]);
+  if (!slugs.size) { box.innerHTML='<span class="small">尚无场景,先推进剧情</span>'; return; }
+  slugs.forEach(slug => {
+    const meta = sc[slug] || {};
+    const imgs = (scenesImages && scenesImages[slug]) || meta.image_paths || [];
+    const div = document.createElement('div'); div.className='scene'; div.id='scene-'+slug;
+    div.innerHTML = `<b>${meta.name||slug}</b> <span class="small">(${slug})</span>
+      <div class="small">${escapeHtml((meta.state||'').slice(0,80))}</div>
+      <button onclick="openDraft('${slug}','user_initiated')">画这个场景</button>
+      <div class="gallery"></div>`;
+    const g = div.querySelector('.gallery');
+    imgs.forEach(p => { const im=document.createElement('img'); im.src=imgUrl(p); g.appendChild(im); });
+    box.appendChild(div);
+  });
+}
+function sceneGallery(slug){ const el=$('scene-'+slug); return el ? el.querySelector('.gallery') : null; }
+
+// ---------- 绘图提案 ----------
+function renderProposals(proposals) {
+  (proposals||[]).forEach(p => {
+    const wrap = document.createElement('div'); wrap.className='draft';
+    wrap.innerHTML = `<div>📌 待绘制提案:<b>${p.scene_slug}</b> <span class="badge">${p.kind||''}</span></div>
+      <div class="small">${escapeHtml(p.reason||'')}</div>
+      <button>画这个 (${p.scene_slug})</button>`;
+    wrap.querySelector('button').onclick = () => { wrap.remove(); openDraft(p.scene_slug, 'director_b_proposal'); };
+    $('drafts').prepend(wrap);
+  });
+}
+
+// ---------- 绘图审阅:/draw → 稿 → 确认/复用/跳过 ----------
+async function openDraft(scene, source) {
+  if(!CUR) return;
+  const card = document.createElement('div'); card.className='draft';
+  card.innerHTML = `<div class="small">正在为 <b>${scene}</b> 写稿…</div>`;
+  $('drafts').prepend(card);
+  let draft;
+  try { draft = await (await fetch(api('/story/'+CUR+'/draw'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene, source})})).json(); }
+  catch(e){ card.innerHTML='<span style="color:#e0a0a0">写稿失败:'+e+'</span>'; return; }
+  if (draft.detail) { card.innerHTML='<span style="color:#e0a0a0">'+draft.detail+'</span>'; return; }
+
+  const refsHtml = (draft.refs||[]).map(r => `<div class="ref">${r.preview_path?`<img src="${imgUrl(r.preview_path)}">`:''}<br>${escapeHtml(r.semantic_name)}<br><span style="color:#888">${escapeHtml(r.purpose||'')}</span></div>`).join('');
+  card.innerHTML = `
+    <div>🎨 绘图稿 · <b>${draft.scene}</b> <span class="badge">${draft.kind}</span></div>
+    <div class="small">提示词(可编辑):</div>
+    <textarea>${escapeHtml(draft.prompt_text)}</textarea>
+    <div class="small">引用参考图(语义名):</div>
+    <div>${refsHtml || '<span class="small">无参考图(文生图)</span>'}</div>
+    <div class="row">
+      <button data-act="confirm">✅ 确认出图(花钱)</button>
+      <button data-act="reuse">♻️ 复用已有图</button>
+      <button data-act="skip">⏭ 跳过</button>
+    </div>`;
+  const ta = card.querySelector('textarea');
+  card.querySelector('[data-act="confirm"]').onclick = () => confirmDraw(draft, ta.value, card);
+  card.querySelector('[data-act="reuse"]').onclick  = () => decideDraw(draft, 'reuse', ta.value, card);
+  card.querySelector('[data-act="skip"]').onclick   = () => decideDraw(draft, 'skip',  ta.value, card);
+}
+
+// confirm:独立 SSE 流;不锁输入,文本线照常可用。
+async function confirmDraw(draft, prompt, card) {
+  card.querySelectorAll('button').forEach(b=>b.disabled=true);
+  // 在对应场景下放占位
+  const g = sceneGallery(draft.scene);
+  const ph = document.createElement('div'); ph.className='ph'; ph.textContent='⏳ 生成中(约需1分钟)…';
+  if (g) g.appendChild(ph);
+  card.querySelector('div').innerHTML += ' <span class="small">— 已提交,后台生成中,你可以继续推进剧情</span>';
+  try {
+    await streamSSE(api('/story/'+CUR+'/draw/confirm'), {draft_id:draft.draft_id, decision:'confirm', prompt}, ev => {
+      if (ev.type === 'image_generating') { ph.textContent = '⏳ 生成中(约需1分钟)… [req '+ev.request_id.slice(0,6)+']'; }
+      else if (ev.type === 'image_ready') {
+        const g2 = sceneGallery(ev.scene) || g;
+        const im = document.createElement('img'); im.src = imgUrl(ev.image_path);
+        if (ph.parentNode) ph.replaceWith(im); else if (g2) g2.appendChild(im);
+        card.remove();
+        // 同步刷新黑板 image_paths
+        selectStorySilentRefresh();
+      }
+      else if (ev.type === 'image_failed') { ph.className='ph fail'; ph.textContent='❌ 出图失败:'+ev.reason; card.remove(); }
+    });
+  } catch(e) { ph.className='ph fail'; ph.textContent='❌ 流中断:'+e; }
+}
+
+async function decideDraw(draft, decision, prompt, card) {
+  card.querySelectorAll('button').forEach(b=>b.disabled=true);
+  const body = {draft_id:draft.draft_id, decision, prompt};
+  if (decision==='reuse') { const sc=(lastBlackboard.scenes||{})[draft.scene]||{}; const ps=sc.image_paths||[]; if(ps.length) body.reuse_image_path = ps[ps.length-1]; }
+  const res = await (await fetch(api('/story/'+CUR+'/draw/confirm'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  if (decision==='reuse' && res.image_path) { const g=sceneGallery(draft.scene); if(g){ const im=document.createElement('img'); im.src=imgUrl(res.image_path); g.appendChild(im);} }
+  card.innerHTML = `<div class="small">${draft.scene} · ${decision} 完成</div>`;
+  setTimeout(()=>card.remove(), 1500);
+}
+
+// 轻量刷新黑板(出图落库后同步 image_paths,但不打断叙事)
+async function selectStorySilentRefresh(){ if(!CUR) return; const snap=await (await fetch(api('/story/'+CUR+'/snapshot'))).json(); lastBlackboard=snap.blackboard||{}; renderScenes(snap.scenes_images||{}); renderState(); }
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+loadStories();
+</script>
+</body>
+</html>

@@ -1,29 +1,38 @@
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class WritingBrief(BaseModel):
-    """Director -> Writer 创作指令。extra='allow' 以便 Director 按需附加字段(如 continuity_notes)。"""
+# scene_intent 的合法取值;模型偶尔输出枚举外的词时不报错,代码侧把无法识别的当 uncertain
+VALID_SCENE_INTENTS = ("stay", "likely_new_scene", "likely_recall", "uncertain")
 
-    model_config = ConfigDict(extra="allow")
 
-    must_include: list[str] = Field(default_factory=list)
-    mood: str
-    focus: str
-    pov: str
-    length_hint: str
+def normalize_scene_intent(value: str | None) -> str:
+    return value if value in VALID_SCENE_INTENTS else "uncertain"
 
 
 class DirectorOutput(BaseModel):
-    beat: str
-    scene_event: Literal["enter_new", "modify_current", "recall", "stay"]
-    scene_id: str
-    scene_delta: dict[str, Any] = Field(default_factory=dict)
-    character_updates: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    mood: str
-    writing_brief: WritingBrief
-    choices: list[str] = Field(default_factory=list)
+    """Director-A 的「开拍前导演草稿」:只产出供阅读的创作引导与轻结构意图,绝不产出状态。
+
+    Schema 原则(从 character_updates 的 dict_type 失败吸取的教训):A 的输出走**宽松容错**
+    路线——供阅读的字段一律用宽松类型(str / Optional),不用严格 Enum、不用嵌套 dict,以免
+    模型把本该是散文的内容塞进结构时校验失败、打断整轮。`extra="ignore"`:模型多输出的字段
+    (如旧的 character_updates / scene_delta)一律静默忽略,不报错。A 仍用 JSON mode + 低温,
+    但不再拿严格类型当硬闸门去打断回合。
+
+    状态的唯一权威是 Director-B 的全量重写;A 不碰任何角色/场景/物品状态。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    beat: str  # 这一拍的情节意图(一句话自然语言)
+    writing_brief: str  # 给 Writer 的创作指引,压平为单一自然语言段(融合视角/节奏/须含要点/篇幅)
+    mood: str  # 情绪基调
+    # A 对场景走向的非权威意图猜测:stay / likely_new_scene / likely_recall / uncertain
+    scene_intent: str = "uncertain"
+    # 若觉得要进新/回旧场景,用自然语言点出哪个/什么样(纯提示,不要求精确 slug)
+    scene_hint: str = ""
+    choices: list[str] = Field(default_factory=list)  # 给用户的可选引导项
 
 
 class ReferenceRef(BaseModel):

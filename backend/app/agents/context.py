@@ -21,7 +21,6 @@ import json
 from typing import Any, Literal
 
 from app.agents.loader import load_prompt
-from app.models.schemas import WritingBrief
 
 AgentRole = Literal["director", "writer", "director_review", "illustrator"]
 
@@ -42,20 +41,24 @@ def _render_blackboard(blackboard: Blackboard) -> str:
     return f"【当前黑板】\n{body}"
 
 
-def _render_brief(brief: WritingBrief) -> str:
-    body = json.dumps(brief.model_dump(), ensure_ascii=False, indent=2)
-    return f"【本段创作指令(writing_brief)】\n{body}"
-
-
 def _render_plan(plan: dict[str, Any]) -> str:
-    body = json.dumps(plan, ensure_ascii=False, indent=2)
-    return f"【Director-A 预案(仅供参考,可修正)】\n{body}"
+    """给 B 的 advisory:A 的意图猜测,明确「仅供参考,以 Writer 成稿为准」。
+    只渲染存在的引导/意图字段(不含任何状态);对缺失键宽松容错。"""
+    lines = ["【Director-A 预案(仅供参考,以 Writer 成稿为准)】"]
+    if plan.get("beat"):
+        lines.append(f"情节意图(beat):{plan['beat']}")
+    if plan.get("mood"):
+        lines.append(f"情绪基调(mood):{plan['mood']}")
+    si, sh = plan.get("scene_intent"), plan.get("scene_hint")
+    if si or sh:
+        lines.append(f"场景走向(A 的非权威猜测,以成稿为准):intent={si or '未给'};提示={sh or '无'}")
+    return "\n".join(lines)
 
 
 def _task_tail(
     agent_role: AgentRole,
     *,
-    writing_brief: WritingBrief | None,
+    writing_brief: str | None,
     narrative: str | None,
     director_a_plan: dict[str, Any] | None,
 ) -> str:
@@ -64,7 +67,7 @@ def _task_tail(
     if agent_role == "writer":
         if writing_brief is None:
             raise ValueError("writer 角色必须提供 writing_brief")
-        return f"【任务】\n{WRITER_TASK}\n\n{_render_brief(writing_brief)}"
+        return f"【任务】\n{WRITER_TASK}\n\n【本段创作指引(writing_brief)】\n{writing_brief}"
     if agent_role == "director_review":
         if narrative is None:
             raise ValueError("director_review 角色必须提供 narrative(Writer 成稿)")
@@ -81,7 +84,7 @@ def build_messages(
     history: list[Message],
     blackboard: Blackboard,
     user_action: str,
-    writing_brief: WritingBrief | None = None,
+    writing_brief: str | None = None,
     narrative: str | None = None,
     director_a_plan: dict[str, Any] | None = None,
     visual_style: str | None = None,

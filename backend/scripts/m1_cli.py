@@ -62,8 +62,8 @@ async def run_turn(
         return blackboard, None
     print("--- Director-A 预案 ---")
     print(f"  beat: {a.beat}")
-    print(f"  scene_event={a.scene_event}  scene_id={a.scene_id}  mood={a.mood}")
-    print(f"  brief.must_include={a.writing_brief.must_include}")
+    print(f"  scene_intent={a.scene_intent}  scene_hint={a.scene_hint!r}  mood={a.mood}")
+    print(f"  writing_brief: {a.writing_brief[:100]}…")
 
     # ---- Writer:读同一份黑板 + brief,自由创作(流式)----
     print("\n--- Writer 叙事(流式) ---")

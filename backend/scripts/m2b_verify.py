@@ -46,16 +46,10 @@ BLACKBOARD = {
 # Director-A 预案:A 误判旅人会「留在原地」拾起钥匙(stay) —— 与 Writer 实际走向不符
 A_PLAN = {
     "beat": "旅人拾起树桩上的铜钥匙,端详片刻。",
-    "scene_event": "stay",
-    "scene_id": "forest_edge",
     "mood": "安静的好奇",
-    "writing_brief": {
-        "must_include": ["拾起铜钥匙"],
-        "mood": "安静的好奇",
-        "focus": "钥匙的触感",
-        "pov": "第二人称",
-        "length_hint": "中",
-    },
+    "scene_intent": "stay",
+    "scene_hint": "",
+    "writing_brief": "第二人称、安静好奇的笔触,聚焦钥匙的触感;须落实拾起铜钥匙;篇幅中。",
 }
 
 # 场景 1 成稿:拾钥匙(owner 变更)+ 即兴掏出一张褪色信笺(新物品)+ 实际推门进了木屋(新场景,与 A 的 stay 冲突)

@@ -14,7 +14,7 @@ from app.db.models import Blackboard as BlackboardRow
 from app.db.models import Turn
 from app.db.session import create_all, make_engine, make_session_factory
 from app.llm.deepseek_client import get_client
-from app.models.schemas import WritingBrief
+from app.models.schemas import normalize_scene_intent
 from scripts.m1_cli import load_initial_blackboard, run_turn
 from sqlalchemy import select
 
@@ -38,7 +38,7 @@ async def usage_probe(blackboard: dict) -> None:
     """用最终黑板做一轮探针:A→Writer→B 共享 system+黑板+玩家输入前缀,确认缓存仍命中。"""
     client = get_client()
     action = "我站在原地,静静感受四周的气息。"
-    brief = WritingBrief(must_include=["静立感受四周"], mood="安静", focus="环境", pov="第二人称", length_hint="短")
+    brief = "第二人称、安静的笔触,聚焦四周环境的感官细节;须落实主角静立感受四周;篇幅短。"
 
     def hitmiss(u):
         d = u.model_dump()
@@ -56,7 +56,7 @@ async def usage_probe(blackboard: dict) -> None:
             w_usage = ch.usage
     print(f"  Writer     : hit/miss/total = {hitmiss(w_usage)}")
 
-    b_msgs = build_messages("director_review", history=[], blackboard=blackboard, user_action=action, narrative="你静静站着,听风穿过树梢。", director_a_plan={"scene_event": "stay"})
+    b_msgs = build_messages("director_review", history=[], blackboard=blackboard, user_action=action, narrative="你静静站着,听风穿过树梢。", director_a_plan={"scene_intent": "stay"})
     b = await client.chat.completions.create(model=settings.deepseek_model, messages=b_msgs, temperature=0.3, response_format={"type": "json_object"})
     print(f"  Director-B : hit/miss/total = {hitmiss(b.usage)}")
     return hitmiss(a.usage), hitmiss(w_usage), hitmiss(b.usage)
@@ -138,29 +138,29 @@ async def main() -> None:
     beats_ok = all(0 < len(b) <= 12 and "。" not in b for b in beats)
     check(f"小标题逐轮短小标签(实得 {beats})", beats_ok)
 
-    # Director-B 至少修正过一次 A(对照每轮 A 预案 scene_id/scene_event 与 B 落定的 current_scene)
+    # Director-B 至少修正过一次 A(对照每轮 A 的非权威 scene_intent 与 B 落定的 current_scene 是否变化)
     corrections = []
     prev_scene = initial["story_meta"]["current_scene"]
     for t in turns:
         a_plan = json.loads(t.director_a_json)
         b_after = json.loads(t.blackboard_after)
         b_cur = b_after.get("story_meta", {}).get("current_scene")
-        a_sid = a_plan.get("scene_id")
-        a_ev = a_plan.get("scene_event")
+        a_intent = normalize_scene_intent(a_plan.get("scene_intent"))
+        scene_changed = b_cur != prev_scene
+        # A 猜「留在原地」但 B 换了场景,或 A 猜「进新/回旧」但 B 没换 → 视为 B 修正了 A 的意图
         corrected = (
-            a_sid != b_cur
-            or (a_ev in ("stay", "modify_current") and b_cur != prev_scene)
-            or (a_ev == "enter_new" and b_cur == prev_scene)
+            (a_intent == "stay" and scene_changed)
+            or (a_intent in ("likely_new_scene", "likely_recall") and not scene_changed)
         )
-        corrections.append((t.turn_index, a_ev, a_sid, b_cur, corrected))
+        corrections.append((t.turn_index, a_intent, a_plan.get("scene_hint", ""), b_cur, corrected))
         prev_scene = b_cur
     # 说明:「B 修正 A」是涌现属性,而非每轮必然——A 的 brief 驱动 Writer,Writer 顺着
     # brief 写时 A≈B,B 无需修正。B 的修正是 Writer 偏离 brief 时的安全网,其硬保证已在
     # M2-B 场景 1(A 判 stay、B 据成稿改入新场景)中被断言验证。此处仅作信息性报告。
     n_corr = sum(c[-1] for c in corrections)
-    print(f"    · 每轮 A 预案 vs B 落定(本轮 B 修正 A 共 {n_corr} 次;硬保证见 M2-B):")
-    for idx, a_ev, a_sid, b_cur, corrected in corrections:
-        print(f"        #{idx} A({a_ev},{a_sid!r}) → B current={b_cur!r}  {'【B 修正了 A】' if corrected else '一致'}")
+    print(f"    · 每轮 A 意图 vs B 落定(本轮 B 修正 A 共 {n_corr} 次;硬保证见 M2-B):")
+    for idx, a_intent, a_hint, b_cur, corrected in corrections:
+        print(f"        #{idx} A(intent={a_intent}, hint={a_hint!r}) → B current={b_cur!r}  {'【B 修正了 A】' if corrected else '一致'}")
 
     # ---- 缓存 usage 探针 ----
     print("\n" + "=" * 72)

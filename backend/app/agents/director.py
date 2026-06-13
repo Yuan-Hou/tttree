@@ -20,6 +20,7 @@ async def run_director(
     history: list[Message],
     blackboard: Blackboard,
     user_action: str,
+    knowledge: str = "",
 ) -> DirectorOutput:
     client = get_client()
     messages = build_messages(
@@ -27,6 +28,7 @@ async def run_director(
         history=history,
         blackboard=blackboard,
         user_action=user_action,
+        knowledge=knowledge,
     )
 
     response = await client.chat.completions.create(

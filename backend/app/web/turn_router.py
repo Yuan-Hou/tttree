@@ -22,6 +22,7 @@ from app.agents.director_review import DirectorReviewError, run_director_review
 from app.agents.writer import stream_writer
 from app.db.models import Blackboard, Story, Turn
 from app.db.session import async_session
+from app.knowledge.store import get_knowledge
 from app.state.reducer import reduce_turn
 from app.stories.store import touch_story
 from app.web.sse import SSE_HEADERS, sse
@@ -58,14 +59,15 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         bb_row = await s.get(Blackboard, story_id)
         blackboard = json.loads(bb_row.json_blob)
         history = await _load_history(s, story_id)
+        knowledge = await get_knowledge(s, story_id)  # 仅注入 Director-A 的设定底座
         last_idx = (
             await s.execute(select(func.max(Turn.turn_index)).where(Turn.story_id == story_id))
         ).scalar() or 0
     next_idx = last_idx + 1
 
-    # ---- Director-A ----
+    # ---- Director-A(读黑板 + 设定参考)----
     try:
-        a = await run_director(history, blackboard, user_input)
+        a = await run_director(history, blackboard, user_input, knowledge=knowledge)
     except DirectorOutputError as exc:
         yield sse({"type": "error", "reason": f"director-a: {exc}"})
         return

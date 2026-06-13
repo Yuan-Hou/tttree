@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Blackboard, ImageGen, ReferenceAsset, Story, Turn
+from app.db.models import Blackboard, ImageGen, Knowledge, ReferenceAsset, Story, Turn
 from app.storage import BACKEND_ROOT
 
 
@@ -125,6 +125,7 @@ async def delete_story(
     await session.execute(delete(Turn).where(Turn.story_id == story_id))
     await session.execute(delete(ReferenceAsset).where(ReferenceAsset.story_id == story_id))
     await session.execute(delete(Blackboard).where(Blackboard.story_id == story_id))
+    await session.execute(delete(Knowledge).where(Knowledge.story_id == story_id))
     await session.delete(story)
     await session.commit()
     return True

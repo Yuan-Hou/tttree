@@ -22,6 +22,7 @@ from app.agents.writer import stream_writer
 from app.db.models import Blackboard as BlackboardRow
 from app.db.session import async_session, create_all, engine
 from app.imaging.draw_service import interactive_draw_session
+from app.knowledge.store import get_knowledge
 from app.state.reducer import ReducerResult, reduce_turn
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
@@ -54,9 +55,12 @@ async def run_turn(
 ) -> tuple[Blackboard, ReducerResult | None]:
     print(f"\n>>> 玩家行动: {user_action}\n")
 
-    # ---- Director-A:读黑板,出预案(引导 Writer + 给 B 参考,不落盘)----
+    async with Session() as s:
+        knowledge = await get_knowledge(s, story_id)  # 仅注入 Director-A 的设定底座
+
+    # ---- Director-A:读黑板 + 设定参考,出预案(引导 Writer + 给 B 参考,不落盘)----
     try:
-        a = await run_director(history, blackboard, user_action)
+        a = await run_director(history, blackboard, user_action, knowledge=knowledge)
     except DirectorOutputError as exc:
         print(f"[Director-A 异常] {exc}\n原始返回:\n{exc.raw}")
         return blackboard, None

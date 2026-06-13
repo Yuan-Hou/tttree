@@ -34,6 +34,12 @@ DIRECTOR_REVIEW_TASK = load_prompt("director_review_task.md")
 ILLUSTRATOR_TASK = load_prompt("illustrator_task.md")
 
 
+def _render_knowledge(knowledge: str) -> str:
+    """A 专属的设定参考块。作为第二条 system 消息,放在文风圣经之后、history 之前的
+    稳定前缀位置——基本不变,故 A 的历史缓存大部分仍命中,仅用户改知识库时击穿一次。"""
+    return f"【本故事的世界与角色设定参考(world / character bible)】\n{knowledge}"
+
+
 def _render_blackboard(blackboard: Blackboard) -> str:
     """渲染易变区的完整黑板。同一回合内三个 agent 必须收到逐字节相同的黑板,
     因此本函数是纯函数,不引入任何随机/时间内容。"""
@@ -91,6 +97,7 @@ def build_messages(
     writing_brief: str | None = None,
     narrative: str | None = None,
     director_a_plan: dict[str, Any] | None = None,
+    knowledge: str | None = None,
     visual_style: str | None = None,
     reference_catalog: str | None = None,
 ) -> list[Message]:
@@ -99,11 +106,17 @@ def build_messages(
     history 必须是「干净」的历史(user=玩家输入, assistant=叙事),调用方在三个 agent
     全部跑完之后再追加本轮记录,且追加的是干净消息(不含黑板/任务指令)。
 
-    缓存铁律:system + history 前缀对所有 agent 完全一致;黑板及其后的内容是易变区
-    (本就不缓存),因此 illustrator 在易变区追加「画风圣经 + 参考图库清单」不影响
-    system/history 的前缀命中。叙事三 agent 的易变区构造与 M2 逐字节一致,绝不改动。
+    缓存铁律:第一条 system(文风圣经)对所有 agent 逐字节一致;黑板及其后的内容是易变区
+    (本就不缓存),因此 illustrator 在易变区追加「画风圣经 + 参考图库清单」不影响前缀命中。
+    叙事三 agent 的易变区构造与 M2 逐字节一致,绝不改动。
+
+    知识库(设定圣经库)仅注入 **Director-A**:作为第二条 system 消息插在文风圣经之后、
+    history 之前的稳定前缀位置。Writer / Director-B / illustrator 的 messages 与未引入知识库前
+    逐字节相同——它们的缓存完全不受影响;A 的知识库基本不变,历史缓存大部分仍命中。
     """
     messages: list[Message] = [{"role": "system", "content": STYLE_BIBLE}]
+    if agent_role == "director" and knowledge:
+        messages.append({"role": "system", "content": _render_knowledge(knowledge)})
     messages.extend(history)
 
     if agent_role == "illustrator":

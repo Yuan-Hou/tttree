@@ -35,6 +35,23 @@ class Blackboard(Base):
     )
 
 
+class Knowledge(Base):
+    """每个故事的「设定圣经库」:用户写的一大篇自由文本(角色人设、世界观、关系等,
+    用户自己组织,不切分类条目)。一故事一行。
+
+    与黑板的根本区别:黑板是随剧情变动的「动态世界状态」(agent 读写);知识库是用户精选的
+    「恒定设定底座」(只用户写、agent 只读)。agent 永远不修改知识库。仅注入 Director-A 的上下文。
+    """
+
+    __tablename__ = "knowledge"
+
+    story_id: Mapped[str] = mapped_column(String, primary_key=True)
+    content: Mapped[str] = mapped_column(Text, default="")  # 一大篇自由文本
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class Turn(Base):
     """逐回合存档。blackboard_after 存该轮结束后的完整黑板,用于时间回溯。"""
 

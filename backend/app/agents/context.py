@@ -45,8 +45,12 @@ def _render_plan(plan: dict[str, Any]) -> str:
     """给 B 的 advisory:A 的意图猜测,明确「仅供参考,以 Writer 成稿为准」。
     只渲染存在的引导/意图字段(不含任何状态);对缺失键宽松容错。"""
     lines = ["【Director-A 预案(仅供参考,以 Writer 成稿为准)】"]
-    if plan.get("beat"):
-        lines.append(f"情节意图(beat):{plan['beat']}")
+    if plan.get("situation"):
+        lines.append(f"情境锚点(situation):{plan['situation']}")
+    points = plan.get("beat_points")
+    if isinstance(points, list) and points:
+        joined = " → ".join(str(p) for p in points)
+        lines.append(f"情节要点路标(beat_points,A 拟的推进弧线,以成稿为准):{joined}")
     if plan.get("mood"):
         lines.append(f"情绪基调(mood):{plan['mood']}")
     si, sh = plan.get("scene_intent"), plan.get("scene_hint")

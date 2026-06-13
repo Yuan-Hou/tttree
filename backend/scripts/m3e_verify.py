@@ -25,7 +25,7 @@ async def run_one_turn(blackboard: dict):
     """复现三段式管线(不含交互出图),返回 reducer 结果。"""
     print(f">>> 玩家行动: {ACTION}\n")
     a = await run_director([], blackboard, ACTION)
-    print(f"[A] beat={a.beat}")
+    print(f"[A] situation={a.situation} | beat_points={a.beat_points}")
     chunks = []
     async for tok in stream_writer([], blackboard, ACTION, a.writing_brief):
         chunks.append(tok)

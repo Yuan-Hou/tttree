@@ -45,10 +45,11 @@ BLACKBOARD = {
 
 # Director-A 预案:A 误判旅人会「留在原地」拾起钥匙(stay) —— 与 Writer 实际走向不符
 A_PLAN = {
-    "beat": "旅人拾起树桩上的铜钥匙,端详片刻。",
-    "mood": "安静的好奇",
+    "situation": "旅人站在林间空地的树桩前,树桩上有一把铜钥匙,玩家这步想去拾起它。",
     "scene_intent": "stay",
     "scene_hint": "",
+    "beat_points": ["旅人伸手拿起树桩上的铜钥匙", "端详钥匙的样式与触感"],
+    "mood": "安静的好奇",
     "writing_brief": "第二人称、安静好奇的笔触,聚焦钥匙的触感;须落实拾起铜钥匙;篇幅中。",
 }
 

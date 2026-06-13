@@ -61,7 +61,8 @@ async def run_turn(
         print(f"[Director-A 异常] {exc}\n原始返回:\n{exc.raw}")
         return blackboard, None
     print("--- Director-A 预案 ---")
-    print(f"  beat: {a.beat}")
+    print(f"  situation: {a.situation}")
+    print(f"  beat_points: {a.beat_points}")
     print(f"  scene_intent={a.scene_intent}  scene_hint={a.scene_hint!r}  mood={a.mood}")
     print(f"  writing_brief: {a.writing_brief[:100]}…")
 

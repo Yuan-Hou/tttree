@@ -29,6 +29,28 @@ class ReducerResult:
     draw_proposals: list[dict[str, Any]] = field(default_factory=list)
 
 
+def _stamp_scene_origins(old_bb: Blackboard_t, new_bb: Blackboard_t, turn_index: int) -> None:
+    """给场景打「诞生点」origin_turn(M4.5-C 时间倒流语义的地基)。
+
+    规则:本轮新出现的 scene_slug → origin_turn = 本轮;recall 复用的旧场景 → 保留其原
+    origin_turn 不变(诞生点不随回访改变)。origin_turn 由 reducer **权威维护**,不信任
+    Director-B 的回显——B 全量重写黑板不保证带它,这里就地覆盖正确值。
+
+    注意:场景存续判断(回退/重试用)依据的是 scene.origin_turn,**不是** ImageGen.source_turn;
+    后者只是「这张图实际在哪一轮被生成」的审计信息,语义不同,切勿混用。图通过 scene_slug
+    间接关联到场景的诞生点,自己不记轮次。
+    """
+    old_scenes = old_bb.get("scenes") or {}
+    for slug, scene in (new_bb.get("scenes") or {}).items():
+        if not isinstance(scene, dict):
+            continue
+        prev = old_scenes.get(slug)
+        if isinstance(prev, dict) and "origin_turn" in prev:
+            scene["origin_turn"] = prev["origin_turn"]  # 旧场景:保留诞生点(recall 不改)
+        else:
+            scene["origin_turn"] = turn_index  # 新场景:诞生于本轮
+
+
 def _check_warnings(old_bb: Blackboard_t, new_bb: Blackboard_t) -> list[str]:
     """非阻断软检查:实体异常缩水 / inventory 与 owner 不一致 / location 指向不存在的场景。"""
     warnings: list[str] = []
@@ -120,6 +142,9 @@ async def reduce_turn(
     draw_proposals = draw_proposals if isinstance(draw_proposals, list) else []
     new_bb.pop("removed", None)
     new_bb.pop("draw_proposals", None)
+
+    # 3.5) 给场景打/继承诞生点 origin_turn(回退/重试的时间倒流地基)
+    _stamp_scene_origins(old_bb, new_bb, next_idx)
 
     # 4) 覆盖写 Blackboard(整存,存规范化后的 JSON)
     canonical = json.dumps(new_bb, ensure_ascii=False)

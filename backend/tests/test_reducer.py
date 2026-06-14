@@ -13,6 +13,16 @@ def without_removed(bb: dict) -> dict:
     """持久化的黑板应剥离顶层 removed;用此构造期望值。"""
     return {k: v for k, v in bb.items() if k != "removed"}
 
+
+def strip_origins(bb: dict) -> dict:
+    """归一化:剥掉 reducer 给场景打的 origin_turn(M4.5-C),以便与不含该字段的期望值比对。
+    origin_turn 的正确性由 test_scene_origins.py 专门验证;本文件聚焦 removed 剥离/覆盖。"""
+    bb = json.loads(json.dumps(bb))
+    for sc in (bb.get("scenes") or {}).values():
+        if isinstance(sc, dict):
+            sc.pop("origin_turn", None)
+    return bb
+
 OLD_BB = {
     "story_meta": {"title": "林间迷踪", "current_scene": "forest_edge", "latest_beat": "初入林间"},
     "scenes": {
@@ -106,13 +116,13 @@ async def test_overwrite_and_turn_index_increments(tmp_path):
     async with Session() as s:
         bb = await s.get(Blackboard, STORY)
         assert "removed" not in json.loads(bb.json_blob)  # removed 不入库
-        assert json.loads(bb.json_blob) == without_removed(NEW_BB_2)
+        assert strip_origins(json.loads(bb.json_blob)) == without_removed(NEW_BB_2)
         turns = (await s.execute(select(Turn).where(Turn.story_id == STORY).order_by(Turn.turn_index))).scalars().all()
         assert [t.turn_index for t in turns] == [1, 2]
         assert turns[0].beat_title == "拾匙入屋"
-        assert json.loads(turns[0].blackboard_after) == without_removed(NEW_BB_1)
+        assert strip_origins(json.loads(turns[0].blackboard_after)) == without_removed(NEW_BB_1)
         assert turns[1].beat_title == "翻检木箱"
-        assert json.loads(turns[1].blackboard_after) == without_removed(NEW_BB_2)
+        assert strip_origins(json.loads(turns[1].blackboard_after)) == without_removed(NEW_BB_2)
         # director_b_json 保留 B 的原始输出(含 removed),供审计
         assert "removed" in json.loads(turns[0].director_b_json)
         # 存档字段
@@ -152,7 +162,7 @@ async def test_shrink_warns_but_does_not_block(tmp_path, capsys):
     # 仍然写库(降级=只告警不拦截)
     async with Session() as s:
         bb = await s.get(Blackboard, STORY)
-        assert json.loads(bb.json_blob) == without_removed(shrunk)
+        assert strip_origins(json.loads(bb.json_blob)) == without_removed(shrunk)
     await engine.dispose()
     print(f"\n[shrink] 缩水被告警未阻断;告警 {len(r.warnings)} 条,黑板仍被覆盖。")
 

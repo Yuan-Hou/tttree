@@ -13,6 +13,9 @@ from app.web.stories_router import router as stories_router
 from app.web.turn_router import router as turn_router
 
 _STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
+# M5 前端构建产物(frontend/dist)。开发期走 Vite dev server(:5173,proxy 到此);
+# 部署期 `npm run build` 后,这里把产物挂在 /app 下,与 API 同源、无需 CORS。
+_SPA_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -30,6 +33,10 @@ app.include_router(references_router)
 
 # 生成图/参考图按相对路径(storage/...)存,这里挂成静态目录供浏览器取缩略图。
 app.mount("/storage", StaticFiles(directory=str(STORAGE_ROOT), check_dir=False), name="storage")
+
+# 有构建产物时,把 M5 前端挂在 /app(html=True → SPA 回退)。无产物(纯后端/开发期)则跳过。
+if (_SPA_DIR / "index.html").exists():
+    app.mount("/app", StaticFiles(directory=str(_SPA_DIR), html=True), name="spa")
 
 
 @app.get("/health")

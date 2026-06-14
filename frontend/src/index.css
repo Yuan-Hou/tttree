@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────
+   冷白纯净 · 设计令牌
+   层次靠「冷白底 + 纯白抬升 + 极细冷线」,不靠重阴影;
+   全局唯一点缀色是植物墨绿(松针),只出现在生长节点、光标、主行动。
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --color-paper: #f6f7f9; /* 冷近白:整体地面,不刺眼、不偏暖 */
+  --color-surface: #ffffff; /* 抬升面:卡片/侧栏,靠比地面更白来分层 */
+  --color-sunken: #eef1f4; /* 下沉/次级填充 */
+  --color-ink: #1c2530; /* 正文墨:冷石板,不是纯黑 */
+  --color-ink-soft: #5c6775; /* 次级文字 */
+  --color-ink-faint: #909aa6; /* 三级/标注 */
+  --color-line: #e4e8ed; /* 发丝线 */
+  --color-line-strong: #d3d9e0;
+
+  --color-accent: #2f6f66; /* 植物墨绿(松针)— 全局唯一点缀 */
+  --color-accent-ink: #235650; /* 浅底上的点缀文字 */
+  --color-accent-soft: #e6f0ee; /* 点缀的极浅底 */
+
+  --color-danger: #b4544e; /* 克制冷玫:删除/失败 */
+  --color-danger-soft: #f3e5e4;
+
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB",
+    "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-serif: "Newsreader", Georgia, "Songti SC", "STSong", serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
+    "Roboto Mono", monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 安静的滚动条 — 不抢注意力 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 9px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+  background-clip: content-box;
+}
+
+/* 流式涌现的光标:一根细竖条,点缀色,柔和呼吸 */
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--color-accent);
+  border-radius: 1px;
+  animation: caret-breathe 1.15s ease-in-out infinite;
+}
+@keyframes caret-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+
+/* 图片异步浮现:从占位到成图,轻柔放大淡入(架构的回报时刻) */
+.surface-in {
+  animation: surface-in 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes surface-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 占位呼吸 */
+.breathe {
+  animation: breathe 1.8s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret::after,
+  .surface-in,
+  .breathe {
+    animation: none !important;
+  }
+}

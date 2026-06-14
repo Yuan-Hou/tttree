@@ -6,7 +6,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ReferenceAsset
@@ -75,14 +75,52 @@ async def update_reference_description(
     return asset
 
 
+async def update_reference(
+    session: AsyncSession,
+    asset_id: int,
+    *,
+    label: str | None = None,
+    description: str | None = None,
+    category: str | None = None,
+) -> ReferenceAsset | None:
+    """改 label / description / category(只改传入的非 None 字段)。不存在返回 None。"""
+    asset = await session.get(ReferenceAsset, asset_id)
+    if asset is None:
+        return None
+    if category is not None and category not in VALID_CATEGORIES:
+        raise ValueError(f"category 必须是 {VALID_CATEGORIES} 之一,实得 {category!r}")
+    if label is not None:
+        asset.label = label
+    if description is not None:
+        asset.description = description
+    if category is not None:
+        asset.category = category
+    await session.commit()
+    await session.refresh(asset)
+    return asset
+
+
 async def delete_reference(
     session: AsyncSession, asset_id: int, *, base_dir: Path = BACKEND_ROOT
 ) -> bool:
+    """删除参考图库里这条素材本身。
+
+    连带保护:**不触碰** ImageGen——历史上用这张参考图生成过的图是独立资产(其 ImageGen 记录
+    与 storage/images 文件都保留),这里只删 ReferenceAsset 行 + 它自己的 storage/references 文件。
+    且共享文件模型(fork 会让副本与原档共享同一参考图文件):删行后,仅当无其他 ReferenceAsset
+    再引用同一 file_path 时才物理删文件,否则保留。
+    """
     asset = await session.get(ReferenceAsset, asset_id)
     if asset is None:
         return False
-    file_abs = base_dir / asset.file_path
-    file_abs.unlink(missing_ok=True)
+    file_path = asset.file_path
     await session.delete(asset)
     await session.commit()
+    still_used = (
+        await session.execute(
+            select(func.count()).select_from(ReferenceAsset).where(ReferenceAsset.file_path == file_path)
+        )
+    ).scalar()
+    if not still_used:
+        (base_dir / file_path).unlink(missing_ok=True)
     return True

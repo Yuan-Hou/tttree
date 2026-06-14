@@ -97,7 +97,12 @@ async def apply_decision(
     origin: str,
     source_turn: int | None = None,
     reuse_image_path: str | None = None,
+    resolved: ResolvedRefs | None = None,
 ) -> dict:
+    # 用户在 confirm 前可编辑引用清单(增删参考图);传入 resolved 即「用户最终确认的清单」,
+    # 执行层据此传图、ImageGen 也记这一份(审计反映实际用了什么,不是 Agent 原始建议)。
+    use_refs = resolved if resolved is not None else bundle.resolved
+
     if decision == "skip":
         return {"action": "skip", "scene": bundle.scene_slug}
 
@@ -121,7 +126,7 @@ async def apply_decision(
 
     if decision == "confirm":  # 真出图(花钱)
         result = await execute_image(
-            final_prompt=final_prompt, ref_files=bundle.resolved.files, scene_slug=bundle.scene_slug
+            final_prompt=final_prompt, ref_files=use_refs.files, scene_slug=bundle.scene_slug
         )
         ig = await record_generation(
             session,
@@ -129,8 +134,8 @@ async def apply_decision(
             scene_slug=bundle.scene_slug,
             kind=bundle.draft.kind,
             final_prompt=final_prompt,
-            ref_asset_ids=bundle.resolved.asset_ids,
-            ref_image_paths=bundle.resolved.image_paths,
+            ref_asset_ids=use_refs.asset_ids,
+            ref_image_paths=use_refs.image_paths,
             output_path=result.output_path,
             origin=origin,
             source_turn=source_turn,

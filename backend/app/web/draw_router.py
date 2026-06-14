@@ -30,7 +30,8 @@ from app.assets.reference_store import list_references
 from app.db.models import Blackboard, Story
 from app.db.session import async_session
 from app.imaging.draw_service import DraftBundle, apply_decision, prepare_draft
-from app.imaging.executor import ImageGenError
+from app.imaging.executor import ImageGenError, ResolvedRefs, resolve_references
+from app.models.schemas import ReferenceRef
 from app.stories.store import touch_story
 from app.web.sse import SSE_HEADERS, sse
 
@@ -64,6 +65,9 @@ class ConfirmReq(BaseModel):
     decision: str  # confirm(出图,花钱) | reuse(复用已有图) | skip(跳过)
     prompt: str | None = None  # 用户编辑后的提示词;省略则用原稿
     reuse_image_path: str | None = None  # decision=reuse 时可指定复用哪张历史图
+    # 用户编辑后的引用清单(可删 Agent 的某条、加库里另一张)。省略则用 Agent 原始清单。
+    # 每条:{semantic_name, source(reference_asset/history_image), asset_id?, image_path?, purpose}
+    references: list[dict] | None = None
 
 
 def _refs_payload(bundle: DraftBundle, assets_by_id: dict[int, object]) -> list[dict]:
@@ -116,14 +120,20 @@ async def post_draw(story_id: str, req: DrawReq) -> dict:
         "prompt_text": bundle.draft.prompt_text,  # 可编辑;confirm 时回传
         "refs": _refs_payload(bundle, {a.id: a for a in assets}),
         "history": [{"semantic_name": h["semantic_name"], "image_path": h["image_path"]} for h in bundle.history],
+        # 库里可加的参考图(供用户在 confirm 前往清单里添加;M5 据此渲染「可添加」列表)
+        "library": [
+            {"asset_id": a.id, "label": a.label, "description": a.description,
+             "category": a.category, "file_path": a.file_path}
+            for a in assets
+        ],
     }
 
 
 async def _confirm_events(
-    pending: _PendingDraft, final_prompt: str, request_id: str
+    pending: _PendingDraft, final_prompt: str, request_id: str, resolved: ResolvedRefs | None
 ) -> AsyncIterator[str]:
     """confirm 的短命 SSE 流:先推 generating(此时 execute_image 尚未开始/在跑,请求不阻塞),
-    await 真出图(真实异步间隔),再推 ready / failed,关流。"""
+    await 真出图(真实异步间隔),再推 ready / failed,关流。resolved=用户编辑后的引用清单。"""
     yield sse({"type": "image_generating", "scene": pending.bundle.scene_slug, "request_id": request_id})
     try:
         async with async_session() as s:
@@ -135,6 +145,7 @@ async def _confirm_events(
                 story_id=pending.story_id,
                 origin=pending.origin,
                 source_turn=pending.source_turn,
+                resolved=resolved,
             )
             await touch_story(s, pending.story_id)
     except ImageGenError as exc:  # API 拒绝/网络等:已捕获,不崩溃
@@ -162,10 +173,18 @@ async def post_confirm(story_id: str, req: ConfirmReq):
 
     final_prompt = req.prompt if req.prompt is not None else pending.bundle.draft.prompt_text
 
+    # 用户编辑过引用清单 → 据此重建 resolved(执行层按用户最终清单传图、ImageGen 也记这一份)
+    resolved: ResolvedRefs | None = None
+    if req.references is not None:
+        manifest = [ReferenceRef.model_validate(r) for r in req.references]
+        async with async_session() as s:
+            assets = await list_references(s, story_id)
+        resolved = resolve_references(manifest, {a.id: a for a in assets})
+
     if req.decision == "confirm":
         request_id = uuid.uuid4().hex
         return StreamingResponse(
-            _confirm_events(pending, final_prompt, request_id),
+            _confirm_events(pending, final_prompt, request_id, resolved),
             media_type="text/event-stream",
             headers=SSE_HEADERS,
         )
@@ -181,6 +200,7 @@ async def post_confirm(story_id: str, req: ConfirmReq):
                 origin=pending.origin,
                 source_turn=pending.source_turn,
                 reuse_image_path=req.reuse_image_path,
+                resolved=resolved,
             )
             await touch_story(s, story_id)
         return res

@@ -4,7 +4,8 @@ import { ReadingColumn } from "./components/ReadingColumn";
 import { Composer } from "./components/Composer";
 import { StatePanel } from "./components/StatePanel";
 import { ScenesPanel } from "./components/ScenesPanel";
-import { DraftReview } from "./components/DraftReview";
+import { DrawDeck } from "./components/DrawDeck";
+import { Workbench } from "./components/Workbench";
 import { Eyebrow } from "./components/ui";
 
 export function App() {
@@ -33,9 +34,21 @@ export function App() {
           {e.curId ? (
             <>
               <span className="font-serif text-[19px] text-ink">{e.title}</span>
-              <span className="ml-auto font-mono text-[11px] text-ink-faint">
-                {chapters ? `${chapters} 拍已写就` : "尚未落笔"}
-              </span>
+              <div className="ml-auto flex items-center gap-4">
+                <span className="font-mono text-[11px] text-ink-faint">
+                  {chapters ? `${chapters} 拍已写就` : "尚未落笔"}
+                </span>
+                <button
+                  onClick={e.openScope}
+                  className="relative flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-ink-soft transition hover:border-accent hover:text-accent-ink"
+                  title="摊开本轮三段式内部流:看进度、看每个 agent 的上下文、回退/重试/副本"
+                >
+                  <span className="text-accent">⊞</span> 导演工作台
+                  {e.turnStreaming && (
+                    <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-paper breathe" />
+                  )}
+                </button>
+              </div>
             </>
           ) : (
             <span className="ml-auto font-mono text-[11px] text-ink-faint">未选择故事</span>
@@ -63,10 +76,11 @@ export function App() {
               pending={e.pending}
               onDraw={(slug) => e.openDraft(slug, "user_initiated")}
             />
-            <DraftReview
-              proposals={e.proposals}
+            <DrawDeck
+              storyId={e.curId}
+              drawsVersion={e.drawsVersion}
               drafts={e.drafts}
-              onProposal={e.startDraftFromProposal}
+              onReload={e.reloadScope}
               onEditPrompt={e.editDraftPrompt}
               onConfirm={e.confirmDraft}
               onReuse={(k) => e.decideDraft(k, "reuse")}
@@ -83,6 +97,31 @@ export function App() {
           </div>
         )}
       </aside>
+
+      {/* 导演工作台:平时收起不占阅读空间,展开为覆盖层大视图 */}
+      {e.scopeOpen && e.curId && (
+        <Workbench
+          onClose={e.closeScope}
+          storyId={e.curId}
+          title={e.title}
+          turns={e.turns}
+          scopeTurn={e.scopeTurn}
+          setScopeTurn={e.setScopeTurn}
+          latestTurn={e.latestTurn}
+          liveStages={e.liveStages}
+          liveTurn={e.liveTurn}
+          turnStreaming={e.turnStreaming}
+          retrying={e.retrying}
+          contextsVersion={e.contextsVersion}
+          drawsVersion={e.drawsVersion}
+          proposals={e.proposals}
+          onRetry={e.doRetry}
+          onRollback={e.doRollback}
+          onFork={e.doFork}
+          saveStepContext={e.saveStepContext}
+          reloadScope={e.reloadScope}
+        />
+      )}
     </div>
   );
 }

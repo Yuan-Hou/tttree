@@ -14,6 +14,9 @@ export default defineConfig({
   server: {
     host: true, // 0.0.0.0 — 让 Windows 浏览器经 WSL 访问
     port: 5173,
+    // WSL2 下代码在 Windows 盘(/mnt/e)上,inotify 不触发 → HMR 收不到改动。
+    // 用轮询监听,确保热更新可靠(代价是后台轮询,开发期可接受)。
+    watch: { usePolling: true, interval: 300 },
     proxy: {
       ...proxy("/stories"),
       ...proxy("/story"),

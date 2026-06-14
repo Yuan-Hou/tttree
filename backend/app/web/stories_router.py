@@ -6,6 +6,7 @@ from app.stories.store import (
     StoryInfo,
     create_story,
     delete_story,
+    fork_story,
     list_stories,
     rename_story,
 )
@@ -68,3 +69,13 @@ async def api_delete_story(story_id: str, session: AsyncSession = Depends(get_se
     if not ok:
         raise HTTPException(404, "story not found")
     return {"ok": True, "deleted": story_id}
+
+
+@router.post("/{story_id}/fork", response_model=StoryResp)
+async def api_fork_story(story_id: str, session: AsyncSession = Depends(get_session)) -> StoryResp:
+    """副本(后悔药):完整克隆故事档案,图片文件物理共享(M4.5-C-2)。新副本出现在书架。"""
+    story = await fork_story(session, story_id)
+    if story is None:
+        raise HTTPException(404, "story not found")
+    infos = {i.id: i for i in await list_stories(session)}
+    return StoryResp.of(infos[story.id])

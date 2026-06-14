@@ -97,16 +97,16 @@ def render_reference_catalog(
     return "\n".join(lines)
 
 
-async def run_illustrator(
+def build_illustrator_messages(
     *,
     history: list[Message],
     blackboard: Blackboard,
     draw_request: str,
     reference_catalog: str,
     visual_style: str = VISUAL_STYLE_BIBLE,
-) -> IllustratorDraft:
-    client = get_client()
-    messages = build_messages(
+) -> list[Message]:
+    """构造喂给绘图 Agent 的完整输入(供「写稿节点」按区块展示+编辑+原样重跑)。"""
+    return build_messages(
         "illustrator",
         history=history,
         blackboard=blackboard,
@@ -114,6 +114,26 @@ async def run_illustrator(
         visual_style=visual_style,
         reference_catalog=reference_catalog,
     )
+
+
+async def run_illustrator(
+    *,
+    history: list[Message],
+    blackboard: Blackboard,
+    draw_request: str,
+    reference_catalog: str,
+    visual_style: str = VISUAL_STYLE_BIBLE,
+    messages: list[Message] | None = None,
+) -> IllustratorDraft:
+    client = get_client()
+    if messages is None:
+        messages = build_illustrator_messages(
+            history=history,
+            blackboard=blackboard,
+            draw_request=draw_request,
+            reference_catalog=reference_catalog,
+            visual_style=visual_style,
+        )
 
     response = await client.chat.completions.create(
         model=settings.deepseek_model,

@@ -47,6 +47,31 @@ async def get_step_contexts(
     return out
 
 
+async def set_step_context(
+    session: AsyncSession, story_id: str, turn_index: int, step: str, messages: list[Message]
+) -> bool:
+    """把某一轮某一步的输入记录(完整 messages)就地改写为 messages —— **直接改这一步存的那份
+    记录本身**,不是独立补丁层(改完存的就是改后内容,刷新还在)。
+
+    只写 _STEP_COLUMNS[step] 这一列,绝不顺着内容关联去动上游的输出记录:用户改的是当前节点的
+    输入记录,上游 agent 的输出(director_a_json / narrative / blackboard_after)原样不动。
+    未知 step 或该轮不存在 → 返回 False。
+    """
+    col = _STEP_COLUMNS.get(step)
+    if col is None:
+        return False
+    turn = (
+        await session.execute(
+            select(Turn).where(Turn.story_id == story_id, Turn.turn_index == turn_index)
+        )
+    ).scalar_one_or_none()
+    if turn is None:
+        return False
+    setattr(turn, col, json.dumps(messages, ensure_ascii=False))
+    await session.commit()
+    return True
+
+
 async def prune_step_contexts(
     session: AsyncSession, story_id: str, *, keep_recent_n: int
 ) -> int:

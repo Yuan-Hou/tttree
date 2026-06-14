@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Blackboard, Turn
 from app.stories.store import empty_blackboard
+from app.turns.draw_proposals import delete_draw_proposals_for_turn
 from app.turns.scene_origins import images_for_scenes, scenes_born_in_turn
 
 
@@ -67,6 +68,8 @@ async def rollback_latest_turn(session: AsyncSession, story_id: str) -> Rollback
     else:
         bb_row.json_blob = target_bb_str
     await session.delete(latest)
+    # 该轮产生的绘图提案随之清理(依附的轮没了);ImageGen 与磁盘图不动。重试时 reduce 会重新落库。
+    await delete_draw_proposals_for_turn(session, story_id, n)
     await session.commit()
 
     return RollbackResult(

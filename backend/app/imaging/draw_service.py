@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.illustrator import render_reference_catalog, run_illustrator
+from app.agents.illustrator import build_illustrator_messages, render_reference_catalog, run_illustrator
 from app.assets.reference_store import list_references
 from app.db.models import ImageGen
 from app.imaging.executor import ImageGenError, ResolvedRefs, execute_image, resolve_references
 from app.imaging.pipeline import record_generation
-from app.models.schemas import IllustratorDraft
+from app.models.schemas import IllustratorDraft, ReferenceRef
 
 _HISTORY_TAGS = ["初见", "再访", "其后"]
 
@@ -53,6 +53,18 @@ class DraftBundle:
     history: list[dict]
 
 
+def _kind_hint(kind: str | None) -> str:
+    """把后端权威判定的绘图类型告诉绘图 Agent,让它写对应风格的提示词、为 variant 选基底图。"""
+    if kind == "variant":
+        return (
+            "\n\n【绘图类型已定:variant 同场景变体】请基于本场景已有的历史生成图做变体,"
+            "在引用清单里引用作为基底的那张历史图,保持空间布局/视觉锚点连贯。"
+        )
+    if kind == "new_scene":
+        return "\n\n【绘图类型已定:new_scene 本场景基底图】这是该场景的第一张图,文生图建立基底视觉。"
+    return ""
+
+
 async def prepare_draft(
     session: AsyncSession,
     *,
@@ -60,17 +72,96 @@ async def prepare_draft(
     blackboard: dict,
     scene_slug: str,
     draw_request: str,
+    history: list | None = None,
+    kind: str | None = None,
 ) -> DraftBundle:
-    """阶段①:绘图 Agent 据黑板 + 画风圣经 + 参考图库清单写稿。"""
+    """阶段①:绘图 Agent 据黑板 + 画风圣经 + 参考图库清单写稿。
+
+    history / blackboard 由调用方按「该绘图提案所属轮 N」截断后传入(≤N 的对话 + 第 N 轮
+    blackboard_after),避免把后续剧情画进早期场景图。kind 为后端权威判定值(按 origin_turn),
+    传入后:① 作为提示告知 Agent ② 覆盖 Agent 自报的 kind,确保存档 kind 与规则一致。
+    """
     assets = await list_references(session, story_id)
     scene = blackboard["scenes"][scene_slug]
-    history = await build_history_catalog(session, story_id, scene_slug, scene.get("name", scene_slug))
-    catalog = render_reference_catalog(assets, history_images=history)
+    history_imgs = await build_history_catalog(session, story_id, scene_slug, scene.get("name", scene_slug))
+    catalog = render_reference_catalog(assets, history_images=history_imgs)
     draft = await run_illustrator(
-        history=[], blackboard=blackboard, draw_request=draw_request, reference_catalog=catalog
+        history=history or [],
+        blackboard=blackboard,
+        draw_request=draw_request + _kind_hint(kind),
+        reference_catalog=catalog,
     )
+    if kind in ("new_scene", "variant"):
+        draft.kind = kind  # 后端权威覆盖
     resolved = resolve_references(draft.reference_manifest, {a.id: a for a in assets})
-    return DraftBundle(scene_slug=scene_slug, draft=draft, resolved=resolved, history=history)
+    return DraftBundle(scene_slug=scene_slug, draft=draft, resolved=resolved, history=history_imgs)
+
+
+async def write_illustration_draft(
+    session: AsyncSession,
+    *,
+    story_id: str,
+    blackboard: dict,
+    scene_slug: str,
+    draw_request: str,
+    history: list,
+    kind: str | None,
+    messages: list | None = None,
+) -> tuple[list, IllustratorDraft]:
+    """写稿步(绘图 Agent / DeepSeek)。返回 (喂进去的完整 messages, 写出的稿)。
+
+    messages 给定(用户编辑过的写稿输入)则原样重跑;否则按截断上下文构造。kind 为后端权威值,
+    覆盖 Agent 自报。供「写稿节点」持久化输入+输出、并支持「重写提示词」。
+    """
+    assets = await list_references(session, story_id)
+    scene = blackboard["scenes"][scene_slug]
+    hist_imgs = await build_history_catalog(session, story_id, scene_slug, scene.get("name", scene_slug))
+    catalog = render_reference_catalog(assets, history_images=hist_imgs)
+    full_request = draw_request + _kind_hint(kind)
+    used = messages or build_illustrator_messages(
+        history=history, blackboard=blackboard, draw_request=full_request, reference_catalog=catalog
+    )
+    draft = await run_illustrator(
+        history=history, blackboard=blackboard, draw_request=full_request,
+        reference_catalog=catalog, messages=used,
+    )
+    if kind in ("new_scene", "variant"):
+        draft.kind = kind
+    return used, draft
+
+
+async def picture_from_refs(
+    session: AsyncSession,
+    *,
+    story_id: str,
+    scene_slug: str,
+    kind: str,
+    final_prompt: str,
+    references: list[ReferenceRef],
+    origin: str,
+    source_turn: int | None,
+) -> dict:
+    """画图步(gpt-image-2)。据用户确认的提示词 + 自由选择的参考图(图库 + 过往结果)出图。
+
+    这是触达 gpt-image-2 的路径,由「画图节点/绘图台出图」的显式确认动作调用 —— 确认闸门保留、无旁路。
+    ImageGen 记录用户最终所选参考图(图库→ref_asset_ids,过往结果→ref_image_paths),审计反映实际所用。
+    """
+    assets = await list_references(session, story_id)
+    resolved = resolve_references(references, {a.id: a for a in assets})
+    result = await execute_image(final_prompt=final_prompt, ref_files=resolved.files, scene_slug=scene_slug)
+    ig = await record_generation(
+        session,
+        story_id=story_id,
+        scene_slug=scene_slug,
+        kind=kind,
+        final_prompt=final_prompt,
+        ref_asset_ids=resolved.asset_ids,
+        ref_image_paths=resolved.image_paths,
+        output_path=result.output_path,
+        origin=origin,
+        source_turn=source_turn,
+    )
+    return {"scene": scene_slug, "output_path": result.output_path, "api_call": result.api_call, "imagegen_id": ig.id}
 
 
 def format_review(bundle: DraftBundle, final_prompt: str | None = None) -> str:

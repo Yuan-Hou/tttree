@@ -111,3 +111,31 @@ class ImageGen(Base):
     origin: Mapped[str] = mapped_column(String, default="")  # director_b_proposal/user_initiated
     source_turn: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class DrawProposal(Base):
+    """绘图待办(M5-B 绘图语义升级):把 Director-B 的瞬时 draw_proposals 升级成「积压在场景上、
+    跨轮可见可画」的持久待办。绘图的发起与场景诞生解耦——第2轮的提案可能拖到第5轮才画。
+
+    kind 由**后端按场景诞生点权威判定**(不按发起轮):提案产生轮 == 场景 origin_turn → new_scene;
+    > origin_turn(场景已存在,后续再画/召回) → variant。一个场景一生只有诞生轮那条是 new_scene。
+    回退/重试某轮时,该轮产生的提案随之清理(依附的轮没了),由 reducer 重新落库。
+    """
+
+    __tablename__ = "draw_proposals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    story_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    scene_slug: Mapped[str] = mapped_column(String, nullable=False)
+    origin_proposal_turn: Mapped[int] = mapped_column(Integer, nullable=False)  # 这条提案在哪轮产生
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # new_scene/variant(后端按 origin_turn 定)
+    status: Mapped[str] = mapped_column(String, default="pending")  # pending/done
+    reason: Mapped[str] = mapped_column(Text, default="")  # B 给的配图理由,供待办面板展示
+    done_image_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 画完指向 ImageGen.id
+    # 写稿步(绘图 Agent / DeepSeek)的持久产物 —— 让「写稿节点」与「画图节点」成为两个真正独立、
+    # 各自可看可重试的步骤。draft_messages=喂给绘图 Agent 的完整输入(按区块展示+可编辑);
+    # draft_prompt=它写出的提示词文本(写稿的输出,绝不是图);draft_manifest=它建议的引用清单。
+    draft_messages: Mapped[str] = mapped_column(Text, default="")  # JSON messages
+    draft_prompt: Mapped[str] = mapped_column(Text, default="")  # 写稿输出:提示词文本
+    draft_manifest: Mapped[str] = mapped_column(Text, default="[]")  # JSON: 建议的 ReferenceRef
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

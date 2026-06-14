@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Blackboard, Turn
+from app.turns.draw_proposals import persist_draw_proposals
 
 Blackboard_t = dict[str, Any]
 
@@ -170,6 +171,12 @@ async def reduce_turn(
             director_b_messages=director_b_messages,
         )
     )
+
+    # 6) 绘图提案落库成持久待办(M5-B):kind 按场景 origin_turn 权威判定。new_bb 已 stamp 诞生点。
+    persist_draw_proposals(
+        session, story_id=story_id, turn_index=next_idx, proposals=draw_proposals, blackboard=new_bb
+    )
+
     await session.commit()
 
     return ReducerResult(

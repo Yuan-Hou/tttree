@@ -1,5 +1,17 @@
 // 同源调用(开发期由 Vite proxy 转发到 :8000;部署期与 FastAPI 同源)。
-import type { Draft, DrawEvent, Snapshot, StoryInfo, TurnEvent } from "./types";
+import type {
+  ContextMessage,
+  Draft,
+  DrawEvent,
+  PickedRef,
+  ProposalDraw,
+  ProposalsResp,
+  Snapshot,
+  StoryInfo,
+  TurnContexts,
+  TurnDraws,
+  TurnEvent,
+} from "./types";
 
 const json = { "Content-Type": "application/json" };
 
@@ -28,12 +40,85 @@ export const renameStory = (id: string, title: string) =>
 
 export const getSnapshot = (id: string) => jget<Snapshot>(`/story/${id}/snapshot`);
 
-export const postDraw = (id: string, scene: string, source: string) =>
-  fetch(`/story/${id}/draw`, {
+// ── 时间控制 + 节点上下文(M5-B)──
+export const getTurnContexts = (id: string, turnIndex: number) =>
+  jget<TurnContexts>(`/story/${id}/turn/${turnIndex}/contexts`);
+
+export const getTurnDraws = (id: string, turnIndex: number) =>
+  jget<TurnDraws>(`/story/${id}/turn/${turnIndex}/draws`);
+
+export const getStoryProposals = (id: string) => jget<ProposalsResp>(`/story/${id}/proposals`);
+
+// ── 绘图节点拆分:写稿(DeepSeek)/ 画图(gpt-image-2)──
+export const getProposalDraw = (id: string, pid: number) =>
+  jget<ProposalDraw>(`/story/${id}/draw/proposal/${pid}`);
+
+/** 写稿(重)跑:输出提示词文本。messages 给定=用编辑后的输入重写。 */
+export const writeDraft = (id: string, pid: number, messages?: ContextMessage[]) =>
+  fetch(`/story/${id}/draw/proposal/${pid}/write`, {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ scene, source }),
-  }).then((r) => r.json() as Promise<Draft & { detail?: string }>);
+    body: JSON.stringify({ messages: messages ?? null }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json() as Promise<{ draft_prompt: string; draft_manifest: import("./types").DraftRef[]; draft_messages: ContextMessage[]; warn_redraw_base: boolean }>;
+  });
+
+export const saveDraftMessages = (id: string, pid: number, messages: ContextMessage[]) =>
+  fetch(`/story/${id}/draw/proposal/${pid}/draft-messages`, {
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ messages }),
+  }).then((r) => r.json());
+
+/** 画图(重)出图:用确认的提示词 + 自由选择的参考图调 gpt-image-2(短命 SSE,确认即花钱)。 */
+export const pictureDraw = (
+  id: string,
+  pid: number,
+  body: { prompt: string; references: PickedRef[] },
+  onEvent: (e: DrawEvent) => void,
+) => streamSSE<DrawEvent>(`/story/${id}/draw/proposal/${pid}/picture`, body, onEvent);
+
+/** 改写某步的输入记录(直接改 M4.5-B 存的那份;仅最新轮)。 */
+export const saveStepContext = (
+  id: string,
+  turnIndex: number,
+  step: "director_a" | "writer" | "director_b",
+  messages: ContextMessage[],
+) =>
+  fetch(`/story/${id}/turn/${turnIndex}/contexts/${step}`, {
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ messages }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json();
+  });
+
+export const rollback = (id: string) =>
+  fetch(`/story/${id}/rollback`, { method: "POST", headers: json }).then((r) => r.json());
+
+export const retry = (id: string, entry: "director_a" | "writer" | "director_b") =>
+  fetch(`/story/${id}/retry`, { method: "POST", headers: json, body: JSON.stringify({ entry }) }).then(
+    async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      return r.json();
+    },
+  );
+
+export const forkStory = (id: string) =>
+  fetch(`/stories/${id}/fork`, { method: "POST", headers: json }).then((r) => r.json() as Promise<StoryInfo>);
+
+export interface DrawOpts {
+  proposal_id?: number; // 提案制:kind/截断轮从提案取
+  scene?: string; // 临时制:直接画某场景
+  source?: string;
+  source_turn?: number | null; // 截断/归属轮
+}
+export const postDraw = (id: string, opts: DrawOpts) =>
+  fetch(`/story/${id}/draw`, { method: "POST", headers: json, body: JSON.stringify(opts) }).then(
+    (r) => r.json() as Promise<Draft & { detail?: string }>,
+  );
 
 /** reuse / skip — 同步 JSON,不出图、不花钱。 */
 export const decideDraw = (

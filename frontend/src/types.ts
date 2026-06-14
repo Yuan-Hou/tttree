@@ -81,6 +81,116 @@ export interface Draft {
   prompt_text: string;
   refs: DraftRef[];
   history: { semantic_name: string; image_path: string }[];
+  warn_redraw_base?: boolean; // 重绘 new_scene 且场景已有 variant → 需警告
+  draw_turn?: number;
+  proposal_id?: number | null;
+}
+
+// ── 绘图台:按场景聚合的待办(子步三)──
+export interface ProposalRow {
+  id: number;
+  scene_slug: string;
+  origin_proposal_turn: number;
+  kind: string;
+  status: "pending" | "done";
+  reason: string;
+  done_image_path: string | null;
+}
+export interface SceneMeta {
+  name: string;
+  has_new_scene: boolean;
+  has_variant: boolean;
+  exists: boolean;
+}
+export interface ProposalsResp {
+  proposals: ProposalRow[];
+  scenes: Record<string, SceneMeta>;
+}
+
+// ── 绘图节点拆分(写稿 / 画图)+ 参考图自由选择 ──
+export interface LibraryAsset {
+  asset_id: number;
+  label: string;
+  description: string;
+  category: string;
+  file_path: string;
+}
+export interface PastImage {
+  imagegen_id: number;
+  scene_slug: string;
+  kind: string;
+  output_path: string;
+}
+export interface ProposalDraw {
+  proposal_id: number;
+  scene_slug: string;
+  kind: string;
+  status: string;
+  origin_proposal_turn: number;
+  done_image_path: string | null;
+  draft_messages: ContextMessage[]; // 写稿输入(可编辑分区)
+  draft_prompt: string; // 写稿输出:提示词文本
+  draft_manifest: DraftRef[]; // 写稿建议引用清单(初始参考图选择)
+  variant_gated: boolean;
+  warn_redraw_base: boolean;
+  library: LibraryAsset[];
+  past_images: PastImage[];
+}
+/** 用户在画图节点最终选定的一条参考图(两类来源)。 */
+export interface PickedRef {
+  source: "reference_asset" | "history_image";
+  asset_id?: number | null;
+  image_path?: string | null;
+  semantic_name: string;
+  purpose: string;
+}
+
+// ── 节点上下文(M4.5-B 读取接口 → M5-B HTTP 壳)──
+export interface ContextMessage {
+  role: string;
+  content: string;
+}
+
+export interface StepContext {
+  messages: ContextMessage[];
+  output: unknown;
+}
+
+export interface TurnContexts {
+  turn_index: number;
+  user_input: string;
+  beat_title: string;
+  director_a: StepContext;
+  writer: StepContext;
+  director_b: StepContext;
+}
+
+export type AgentStep = "director_a" | "writer" | "director_b" | "reducer";
+export type StepStatus = "pending" | "running" | "done";
+
+// ── 绘图支流(每个绘图提案 = 写稿 + 绘图 双节点)。与绘图台同源:DrawProposal 表 ──
+export interface TurnDrawProposal {
+  id: number;
+  scene_slug: string;
+  kind: string;
+  status: "pending" | "done";
+  reason: string;
+  origin_proposal_turn: number;
+  done_image_path: string | null;
+}
+export interface TurnDraws {
+  turn_index: number;
+  proposals: TurnDrawProposal[];
+}
+/** UI 视图:一条绘图提案(pending 待绘制 / done 已画)。live 轮的提案尚未落库 → 无 proposal_id。 */
+export interface DrawItem {
+  key: string;
+  proposal_id?: number;
+  scene_slug: string;
+  kind: string;
+  reason?: string;
+  status: "pending" | "done";
+  done_image_path?: string | null;
 }
 
 // ── 文本线 SSE 事件 ──

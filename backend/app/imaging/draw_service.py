@@ -13,6 +13,7 @@ from app.db.models import ImageGen
 from app.imaging.executor import ImageGenError, ResolvedRefs, execute_image, resolve_references
 from app.imaging.pipeline import record_generation
 from app.models.schemas import IllustratorDraft, ReferenceRef
+from app.stories.settings_store import get_or_create_settings, resolve_agent_model
 
 _HISTORY_TAGS = ["初见", "再访", "其后"]
 
@@ -85,11 +86,14 @@ async def prepare_draft(
     scene = blackboard["scenes"][scene_slug]
     history_imgs = await build_history_catalog(session, story_id, scene_slug, scene.get("name", scene_slug))
     catalog = render_reference_catalog(assets, history_images=history_imgs)
+    st = await get_or_create_settings(session, story_id)
+    model = resolve_agent_model(st, "illustrator")  # 绘图写稿 Agent 的故事内模型设置
     draft = await run_illustrator(
         history=history or [],
         blackboard=blackboard,
         draw_request=draw_request + _kind_hint(kind),
         reference_catalog=catalog,
+        model=model,
     )
     if kind in ("new_scene", "variant"):
         draft.kind = kind  # 后端权威覆盖
@@ -121,9 +125,11 @@ async def write_illustration_draft(
     used = messages or build_illustrator_messages(
         history=history, blackboard=blackboard, draw_request=full_request, reference_catalog=catalog
     )
+    st = await get_or_create_settings(session, story_id)
+    model = resolve_agent_model(st, "illustrator")  # 绘图写稿 Agent 的故事内模型设置
     draft = await run_illustrator(
         history=history, blackboard=blackboard, draw_request=full_request,
-        reference_catalog=catalog, messages=used,
+        reference_catalog=catalog, messages=used, model=model,
     )
     if kind in ("new_scene", "variant"):
         draft.kind = kind

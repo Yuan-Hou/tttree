@@ -6,6 +6,7 @@ import { StatePanel } from "./components/StatePanel";
 import { ScenesPanel } from "./components/ScenesPanel";
 import { DrawDeck } from "./components/DrawDeck";
 import { Workbench } from "./components/Workbench";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { Eyebrow } from "./components/ui";
 
 export function App() {
@@ -47,6 +48,13 @@ export function App() {
                   {e.turnStreaming && (
                     <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-paper breathe" />
                   )}
+                </button>
+                <button
+                  onClick={e.openSettings}
+                  className="flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-ink-soft transition hover:border-accent hover:text-accent-ink"
+                  title="故事内设置:知识库、参考图库、各 agent 模型(随副本复制、随删除清理)"
+                >
+                  <span className="text-accent">⚙</span> 设置
                 </button>
               </div>
             </>
@@ -121,6 +129,11 @@ export function App() {
           saveStepContext={e.saveStepContext}
           reloadScope={e.reloadScope}
         />
+      )}
+
+      {/* 故事内设置:知识库 / 图库(模型设置子步四并入)。覆盖层。 */}
+      {e.settingsOpen && e.curId && (
+        <SettingsPanel storyId={e.curId} title={e.title} onClose={e.closeSettings} />
       )}
     </div>
   );

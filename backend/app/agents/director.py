@@ -3,8 +3,7 @@ import json
 from pydantic import ValidationError
 
 from app.agents.context import Blackboard, Message, build_messages
-from app.config import settings
-from app.llm.deepseek_client import get_client
+from app.llm.registry import resolve_chat
 from app.models.schemas import DirectorOutput
 
 
@@ -22,8 +21,10 @@ async def run_director(
     user_action: str,
     knowledge: str = "",
     messages: list[Message] | None = None,
+    model: str | None = None,
 ) -> DirectorOutput:
-    client = get_client()
+    # model 由 orchestration 按故事内设置解析后传入;None → registry 回落默认(deepseek)。
+    client, model_name = resolve_chat(model)
     # messages 由调用方预构造时直接复用(为了把「真正喂给 LLM 的完整 messages」原样存档,
     # M4.5-B)。不传则照常自行构造。build_messages 逻辑与缓存不受影响。
     if messages is None:
@@ -36,7 +37,7 @@ async def run_director(
         )
 
     response = await client.chat.completions.create(
-        model=settings.deepseek_model,
+        model=model_name,
         messages=messages,
         temperature=0.3,
         response_format={"type": "json_object"},

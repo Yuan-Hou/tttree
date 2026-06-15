@@ -33,7 +33,7 @@ async def env(tmp_path, monkeypatch):
 
     cap = {}
 
-    async def fake_illustrator(*, history, blackboard, draw_request, reference_catalog, visual_style=None, messages=None):
+    async def fake_illustrator(*, history, blackboard, draw_request, reference_catalog, visual_style=None, messages=None, model=None):
         cap["messages"] = messages
         return IllustratorDraft(
             kind="reuse",  # 故意错:应被后端按提案 kind 覆盖

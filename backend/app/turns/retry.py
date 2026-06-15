@@ -34,6 +34,7 @@ from app.db.models import Blackboard, Turn
 from app.knowledge.store import get_knowledge
 from app.models.schemas import DirectorOutput
 from app.state.reducer import reduce_turn
+from app.stories.settings_store import get_or_create_settings, resolve_agent_model
 from app.stories.store import empty_blackboard
 from app.turns.rollback import rollback_latest_turn
 from app.turns.scene_origins import scenes_born_in_turn
@@ -93,6 +94,11 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
     pre_bb = json.loads(pre_bb_str)
     history = await _history_before(session, story_id, n)
     knowledge = await get_knowledge(session, story_id)
+    # 故事内模型设置:重走的 agent 也按各自设置取模型(默认全 deepseek)。
+    st = await get_or_create_settings(session, story_id)
+    model_a = resolve_agent_model(st, "director_a")
+    model_w = resolve_agent_model(st, "writer")
+    model_b = resolve_agent_model(st, "director_b")
 
     # ---- Director-A:新走(director_a 切入)或保留 ----
     # A 的上下文只取决于「本轮之前的状态」,重试时不变 → 存档的 director_a_messages 始终是其正确上下文。
@@ -100,7 +106,7 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
         "director", history=history, blackboard=pre_bb, user_action=user_input, knowledge=knowledge
     )
     if entry == "director_a":
-        a = await run_director(history, pre_bb, user_input, knowledge=knowledge, messages=a_messages)
+        a = await run_director(history, pre_bb, user_input, knowledge=knowledge, messages=a_messages, model=model_a)
     else:
         a = DirectorOutput.model_validate_json(turn_n.director_a_json)
 
@@ -117,7 +123,7 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
                 "writer", history=history, blackboard=pre_bb, user_action=user_input, writing_brief=a.writing_brief
             )
         chunks: list[str] = []
-        async for tok in stream_writer(history, pre_bb, user_input, a.writing_brief, messages=w_messages):
+        async for tok in stream_writer(history, pre_bb, user_input, a.writing_brief, messages=w_messages, model=model_w):
             chunks.append(tok)
         narrative = "".join(chunks)
     else:  # director_b:保留 Writer 成稿
@@ -138,7 +144,7 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
             narrative=narrative, director_a_plan=a.model_dump(),
         )
     new_bb = await run_director_review(
-        history, pre_bb, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages
+        history, pre_bb, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages, model=model_b
     )
 
     # ---- 三段跑完,才动 DB ----

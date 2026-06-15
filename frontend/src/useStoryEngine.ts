@@ -394,6 +394,11 @@ export function useStoryEngine() {
   const openScope = useCallback(() => setScopeOpen(true), []);
   const closeScope = useCallback(() => setScopeOpen(false), []);
 
+  // ── 故事内设置(知识库 / 图库 / 模型,与故事绑定)──
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+
   return {
     stories, curId, title, blackboard, turns, scenesImages, proposals, drafts, pending, turnStreaming,
     refreshStories, selectStory, createStory, removeStory, submitTurn,
@@ -402,5 +407,7 @@ export function useStoryEngine() {
     scopeOpen, scopeTurn, setScopeTurn, openScope, closeScope,
     liveStages, liveTurn, retrying, latestTurn, contextsVersion, drawsVersion,
     doRollback, doRetry, doFork, saveStepContext, reloadScope,
+    // 故事内设置
+    settingsOpen, openSettings, closeSettings,
   };
 }

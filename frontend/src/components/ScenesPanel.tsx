@@ -1,6 +1,7 @@
 import { imgUrl } from "../api";
 import type { Blackboard } from "../types";
 import type { PendingImage } from "../useStoryEngine";
+import { useLightbox } from "./Lightbox";
 import { Button, Eyebrow, Tag } from "./ui";
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function ScenesPanel({ blackboard, scenesImages, pending, onDraw }: Props) {
+  const lightbox = useLightbox();
   const scenes = blackboard.scenes ?? {};
   const slugs = Array.from(new Set([...Object.keys(scenes), ...Object.keys(scenesImages)]));
   const current = blackboard.story_meta?.current_scene;
@@ -52,7 +54,8 @@ export function ScenesPanel({ blackboard, scenesImages, pending, onDraw }: Props
                         key={p}
                         src={imgUrl(p)}
                         alt={sc.name ?? slug}
-                        className="surface-in w-full rounded-[10px] border border-line"
+                        onClick={() => lightbox(imgUrl(p), sc.name ?? slug)}
+                        className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line"
                       />
                     ))}
                     {waiting.map((w) => (

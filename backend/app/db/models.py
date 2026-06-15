@@ -113,6 +113,29 @@ class ImageGen(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class StorySettings(Base):
+    """故事内设置(故事内设置里程碑 · 子步一):每故事一行,随 fork 复制、随 delete 清理。
+
+    模型设置:default_model = 全局默认模型 id;各 agent 的 *_model 为「覆盖」——空串表示
+    「用全局默认」。调用各 agent 时按「该 agent 覆盖 → 否则全局默认」决定用哪个模型。
+    模型 id 取值见 app/llm/registry.MODEL_CHOICES。新故事默认全部走 deepseek-v4-pro,
+    即旧行为不变。default 这里写死 'deepseek-v4-pro' 以避免 models 反向依赖 registry;
+    与 registry.DEFAULT_MODEL_ID 保持一致(store 层建行时也用 DEFAULT_MODEL_ID)。
+    """
+
+    __tablename__ = "story_settings"
+
+    story_id: Mapped[str] = mapped_column(String, primary_key=True)
+    default_model: Mapped[str] = mapped_column(String, default="deepseek-v4-pro")
+    director_a_model: Mapped[str] = mapped_column(String, default="")  # 空 = 用全局默认
+    writer_model: Mapped[str] = mapped_column(String, default="")
+    director_b_model: Mapped[str] = mapped_column(String, default="")
+    illustrator_model: Mapped[str] = mapped_column(String, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class DrawProposal(Base):
     """绘图待办(M5-B 绘图语义升级):把 Director-B 的瞬时 draw_proposals 升级成「积压在场景上、
     跨轮可见可画」的持久待办。绘图的发起与场景诞生解耦——第2轮的提案可能拖到第5轮才画。

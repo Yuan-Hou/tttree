@@ -1,5 +1,6 @@
 import { imgUrl } from "../api";
 import type { LibraryAsset, PastImage, PickedRef } from "../types";
+import { useLightbox } from "./Lightbox";
 
 interface Props {
   library: LibraryAsset[];
@@ -15,6 +16,7 @@ const same = (a: PickedRef, b: PickedRef) =>
 /** 参考图自由选择:两类来源(图库 ReferenceAsset + 过往绘制结果 ImageGen.output)。
  *  初始为绘图 Agent 建议的清单,用户可在此增删;过往结果不按轮截断,整故事历史图都可选。 */
 export function RefPicker({ library, pastImages, value, onChange }: Props) {
+  const lightbox = useLightbox();
   const has = (r: PickedRef) => value.some((v) => same(v, r));
   const add = (r: PickedRef) => !has(r) && onChange([...value, r]);
   const remove = (r: PickedRef) => onChange(value.filter((v) => !same(v, r)));
@@ -38,7 +40,12 @@ export function RefPicker({ library, pastImages, value, onChange }: Props) {
               return (
                 <div key={i} className="relative w-[72px]" title={r.purpose}>
                   {src ? (
-                    <img src={imgUrl(src)} alt={r.semantic_name} className="h-[48px] w-[72px] rounded-md border border-accent/40 object-cover" />
+                    <img
+                      src={imgUrl(src)}
+                      alt={r.semantic_name}
+                      onClick={() => lightbox(imgUrl(src), r.semantic_name)}
+                      className="h-[48px] w-[72px] cursor-zoom-in rounded-md border border-accent/40 object-cover"
+                    />
                   ) : (
                     <div className="flex h-[48px] w-[72px] items-center justify-center rounded-md border border-dashed border-line-strong text-[10px] text-ink-faint">无图</div>
                   )}
@@ -85,11 +92,23 @@ export function RefPicker({ library, pastImages, value, onChange }: Props) {
 }
 
 function Thumb({ src, label, sub, on, onClick }: { src: string; label: string; sub: string; on: boolean; onClick: () => void }) {
+  const lightbox = useLightbox();
   return (
     <button onClick={onClick} className={`w-[72px] text-left ${on ? "opacity-100" : "opacity-90 hover:opacity-100"}`} title={on ? "已选,点击移除" : "点击添加"}>
       <div className="relative">
         <img src={imgUrl(src)} alt={label} className={`h-[48px] w-[72px] rounded-md border object-cover ${on ? "border-accent ring-1 ring-accent" : "border-line"}`} />
         {on && <span className="absolute right-0.5 top-0.5 rounded bg-accent px-1 text-[9px] text-white">已选</span>}
+        <span
+          role="button"
+          onClick={(e) => {
+            e.stopPropagation(); // 看大图,不切换选中
+            lightbox(imgUrl(src), label);
+          }}
+          className="absolute bottom-0.5 left-0.5 flex h-4 w-4 items-center justify-center rounded bg-ink/55 text-[10px] text-white transition hover:bg-ink/80"
+          title="看大图"
+        >
+          ⤢
+        </span>
       </div>
       <div className="mt-0.5 truncate text-[10px] text-ink-soft">{label}</div>
       <div className="truncate text-[9px] text-ink-faint">{sub}</div>

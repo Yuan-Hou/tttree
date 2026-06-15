@@ -34,7 +34,7 @@ async def env(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    async def fake_illustrator(*, history, blackboard, draw_request, reference_catalog, visual_style=None):
+    async def fake_illustrator(*, history, blackboard, draw_request, reference_catalog, visual_style=None, messages=None, model=None):
         captured["history"] = history
         captured["blackboard"] = blackboard
         captured["draw_request"] = draw_request

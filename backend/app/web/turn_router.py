@@ -24,6 +24,7 @@ from app.db.models import Blackboard, Story, Turn
 from app.db.session import async_session
 from app.knowledge.store import get_knowledge
 from app.state.reducer import reduce_turn
+from app.stories.settings_store import get_or_create_settings, resolve_agent_model
 from app.stories.store import touch_story
 from app.web.sse import SSE_HEADERS, sse
 
@@ -60,6 +61,11 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         blackboard = json.loads(bb_row.json_blob)
         history = await _load_history(s, story_id)
         knowledge = await get_knowledge(s, story_id)  # 仅注入 Director-A 的设定底座
+        # 故事内模型设置:各 agent 按「覆盖 → 全局默认」解析出实际模型 id(默认全 deepseek)。
+        st = await get_or_create_settings(s, story_id)
+        model_a = resolve_agent_model(st, "director_a")
+        model_w = resolve_agent_model(st, "writer")
+        model_b = resolve_agent_model(st, "director_b")
         last_idx = (
             await s.execute(select(func.max(Turn.turn_index)).where(Turn.story_id == story_id))
         ).scalar() or 0
@@ -73,7 +79,7 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         "director", history=history, blackboard=blackboard, user_action=user_input, knowledge=knowledge
     )
     try:
-        a = await run_director(history, blackboard, user_input, knowledge=knowledge, messages=a_messages)
+        a = await run_director(history, blackboard, user_input, knowledge=knowledge, messages=a_messages, model=model_a)
     except DirectorOutputError as exc:
         yield sse({"type": "error", "reason": f"director-a: {exc}"})
         return
@@ -85,7 +91,7 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         "writer", history=history, blackboard=blackboard, user_action=user_input, writing_brief=a.writing_brief
     )
     chunks: list[str] = []
-    async for tok in stream_writer(history, blackboard, user_input, a.writing_brief, messages=w_messages):
+    async for tok in stream_writer(history, blackboard, user_input, a.writing_brief, messages=w_messages, model=model_w):
         chunks.append(tok)
         yield sse({"type": "narrative_token", "text": tok})
     narrative = "".join(chunks)
@@ -98,7 +104,7 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
     )
     try:
         new_bb = await run_director_review(
-            history, blackboard, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages
+            history, blackboard, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages, model=model_b
         )
     except DirectorReviewError as exc:
         yield sse({"type": "error", "reason": f"director-b: {exc}"})

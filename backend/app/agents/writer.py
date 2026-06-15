@@ -1,8 +1,7 @@
 from collections.abc import AsyncIterator
 
 from app.agents.context import Blackboard, Message, build_messages
-from app.config import settings
-from app.llm.deepseek_client import get_client
+from app.llm.registry import resolve_chat
 
 
 async def stream_writer(
@@ -11,8 +10,10 @@ async def stream_writer(
     user_action: str,
     writing_brief: str,
     messages: list[Message] | None = None,
+    model: str | None = None,
 ) -> AsyncIterator[str]:
-    client = get_client()
+    # model 由 orchestration 按故事内设置解析后传入;None → registry 回落默认(deepseek)。
+    client, model_name = resolve_chat(model)
     # 调用方预构造时直接复用(供 M4.5-B 原样存档真正喂给 LLM 的 messages);不传则照常构造。
     if messages is None:
         messages = build_messages(
@@ -24,7 +25,7 @@ async def stream_writer(
         )
 
     stream = await client.chat.completions.create(
-        model=settings.deepseek_model,
+        model=model_name,
         messages=messages,
         temperature=0.85,
         stream=True,

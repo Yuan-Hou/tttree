@@ -9,7 +9,15 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Blackboard, ImageGen, Knowledge, ReferenceAsset, Story, Turn
+from app.db.models import (
+    Blackboard,
+    ImageGen,
+    Knowledge,
+    ReferenceAsset,
+    Story,
+    StorySettings,
+    Turn,
+)
 from app.storage import BACKEND_ROOT
 
 
@@ -70,6 +78,15 @@ async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
     kb = await session.get(Knowledge, story_id)
     if kb is not None:
         session.add(Knowledge(story_id=new_id, content=kb.content))
+
+    # 故事内设置(模型设置等):随副本完整复制
+    st = await session.get(StorySettings, story_id)
+    if st is not None:
+        session.add(StorySettings(
+            story_id=new_id, default_model=st.default_model,
+            director_a_model=st.director_a_model, writer_model=st.writer_model,
+            director_b_model=st.director_b_model, illustrator_model=st.illustrator_model,
+        ))
 
     # Turn(逐轮复制,含每步完整上下文 + 保留原逐轮时间戳)
     turns = (
@@ -227,6 +244,7 @@ async def delete_story(
     await session.execute(delete(ReferenceAsset).where(ReferenceAsset.story_id == story_id))
     await session.execute(delete(Blackboard).where(Blackboard.story_id == story_id))
     await session.execute(delete(Knowledge).where(Knowledge.story_id == story_id))
+    await session.execute(delete(StorySettings).where(StorySettings.story_id == story_id))
     await session.delete(story)
     await session.commit()
     return True

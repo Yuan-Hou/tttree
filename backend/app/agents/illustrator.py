@@ -12,9 +12,8 @@ from pydantic import ValidationError
 
 from app.agents.context import Blackboard, Message, build_messages
 from app.agents.loader import load_prompt
-from app.config import settings
 from app.db.models import ReferenceAsset
-from app.llm.deepseek_client import get_client
+from app.llm.registry import resolve_chat
 from app.models.schemas import IllustratorDraft
 
 VISUAL_STYLE_BIBLE = load_prompt("visual_style_bible.md")
@@ -124,8 +123,10 @@ async def run_illustrator(
     reference_catalog: str,
     visual_style: str = VISUAL_STYLE_BIBLE,
     messages: list[Message] | None = None,
+    model: str | None = None,
 ) -> IllustratorDraft:
-    client = get_client()
+    # model 由调用方按故事内设置(illustrator)解析后传入;None → registry 回落默认(deepseek)。
+    client, model_name = resolve_chat(model)
     if messages is None:
         messages = build_illustrator_messages(
             history=history,
@@ -136,7 +137,7 @@ async def run_illustrator(
         )
 
     response = await client.chat.completions.create(
-        model=settings.deepseek_model,
+        model=model_name,
         messages=messages,
         temperature=0.4,
         response_format={"type": "json_object"},

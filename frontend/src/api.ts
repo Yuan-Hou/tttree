@@ -3,6 +3,7 @@ import type {
   ContextMessage,
   Draft,
   DrawEvent,
+  LibraryAsset,
   PickedRef,
   ProposalDraw,
   ProposalsResp,
@@ -108,6 +109,50 @@ export const retry = (id: string, entry: "director_a" | "writer" | "director_b")
 
 export const forkStory = (id: string) =>
   fetch(`/stories/${id}/fork`, { method: "POST", headers: json }).then((r) => r.json() as Promise<StoryInfo>);
+
+// ── 故事内设置:知识库(整篇自由文本)──
+export const getKnowledge = (id: string) => jget<{ content: string }>(`/story/${id}/knowledge`);
+
+export const saveKnowledge = (id: string, content: string) =>
+  fetch(`/story/${id}/knowledge`, { method: "PUT", headers: json, body: JSON.stringify({ content }) }).then(
+    async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      return r.json() as Promise<{ content: string }>;
+    },
+  );
+
+// ── 故事内设置:参考图库 CRUD(复用 M4.5-E 接口)──
+export const listReferences = (id: string) => jget<LibraryAsset[]>(`/story/${id}/references`);
+
+export const addReference = (
+  id: string,
+  opts: { file: File; label: string; description?: string; category?: string },
+) => {
+  const fd = new FormData(); // multipart;不设 Content-Type,交浏览器带 boundary
+  fd.append("file", opts.file);
+  fd.append("label", opts.label);
+  fd.append("description", opts.description ?? "");
+  fd.append("category", opts.category ?? "其他");
+  return fetch(`/story/${id}/references`, { method: "POST", body: fd }).then(async (r) => {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json() as Promise<LibraryAsset>;
+  });
+};
+
+export const updateReference = (
+  id: string,
+  assetId: number,
+  patch: { label?: string; description?: string; category?: string },
+) =>
+  fetch(`/story/${id}/references/${assetId}`, { method: "PATCH", headers: json, body: JSON.stringify(patch) }).then(
+    async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      return r.json() as Promise<LibraryAsset>;
+    },
+  );
+
+export const deleteReference = (id: string, assetId: number) =>
+  fetch(`/story/${id}/references/${assetId}`, { method: "DELETE" }).then((r) => r.json());
 
 export interface DrawOpts {
   proposal_id?: number; // 提案制:kind/截断轮从提案取

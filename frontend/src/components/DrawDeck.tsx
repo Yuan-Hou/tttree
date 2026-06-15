@@ -3,6 +3,7 @@ import { getStoryProposals, imgUrl } from "../api";
 import type { ProposalRow, ProposalsResp, SceneMeta } from "../types";
 import type { DraftCard as Card } from "../useStoryEngine";
 import { DraftCard } from "./DraftCard";
+import { useLightbox } from "./Lightbox";
 import { PictureNodeEditor } from "./PictureNodeEditor";
 import { Eyebrow, Tag } from "./ui";
 
@@ -101,12 +102,18 @@ function SceneGroup({ slug, meta, rows, onPick }: { slug: string; meta?: SceneMe
 }
 
 function TodoRow({ row, meta, onPick }: { row: ProposalRow; meta?: SceneMeta; onPick: (id: number) => void }) {
+  const lightbox = useLightbox();
   const gatedVariant = row.kind === "variant" && !(meta?.has_new_scene ?? false);
   const done = row.status === "done";
   return (
     <div className="flex items-center gap-2.5 rounded-lg border border-line bg-surface px-2.5 py-2">
       {done && row.done_image_path ? (
-        <img src={imgUrl(row.done_image_path)} alt="" className="h-9 w-14 shrink-0 rounded-md border border-line object-cover" />
+        <img
+          src={imgUrl(row.done_image_path)}
+          alt=""
+          onClick={() => lightbox(imgUrl(row.done_image_path!), row.scene_slug)}
+          className="h-9 w-14 shrink-0 cursor-zoom-in rounded-md border border-line object-cover"
+        />
       ) : (
         <span className={`h-2 w-2 shrink-0 rounded-full ${done ? "bg-accent" : gatedVariant ? "bg-line-strong" : "border border-line-strong"}`} />
       )}

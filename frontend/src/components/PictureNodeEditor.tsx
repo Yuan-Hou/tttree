@@ -3,6 +3,7 @@ import * as api from "../api";
 import { imgUrl } from "../api";
 import type { DraftRef, PickedRef } from "../types";
 import { useProposalDraw } from "../useProposalDraw";
+import { useLightbox } from "./Lightbox";
 import { RefPicker } from "./RefPicker";
 import { Button } from "./ui";
 
@@ -25,6 +26,7 @@ const toPicked = (m: DraftRef[]): PickedRef[] =>
  *  输出 = 生成的图;重试 = 只用当前提示词+参考图重新出图,不回去重写提示词。 */
 export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onGenerating }: Props) {
   const { data, loading, reload } = useProposalDraw(storyId, proposalId);
+  const lightbox = useLightbox();
   const [prompt, setPrompt] = useState("");
   const [refs, setRefs] = useState<PickedRef[]>([]);
   const [busy, setBusy] = useState<null | "writing" | "generating">(null);
@@ -89,7 +91,12 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onGener
       {currentImage && (
         <div>
           <Label>{freshImage ? "刚出的图" : "已出的图"}</Label>
-          <img src={imgUrl(currentImage)} alt={data.scene_slug} className="surface-in w-full rounded-[10px] border border-line" />
+          <img
+            src={imgUrl(currentImage)}
+            alt={data.scene_slug}
+            onClick={() => lightbox(imgUrl(currentImage), data.scene_slug)}
+            className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line"
+          />
         </div>
       )}
 

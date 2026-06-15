@@ -9,7 +9,29 @@
       "Bash(grep -iE \"\\\\.env$|pycache|\\\\.pyc|\\\\.venv|\\\\.db\")",
       "Bash(PYTHONPATH=. .venv/bin/python *)",
       "Bash(python3 *)",
-      "Bash(git commit -q -m ' *)"
+      "Bash(git commit -q -m ' *)",
+      "Bash(sed -n '60,68p' scripts/m1_cli.py)",
+      "Bash(sed -n '26,32p' scripts/m3e_verify.py)",
+      "Bash(sed -n '44,54p' scripts/m2b_verify.py)",
+      "Bash(sed -n '40,46p;81,86p;116,122p' scripts/director_b_verify.py)",
+      "Bash(git commit -m ' *)",
+      "Read(//mnt/skills/public/frontend-design/**)",
+      "Read(//mnt/**)",
+      "Bash(find / -name SKILL.md -path '*frontend-design*')",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(pkill -f \"uvicorn app.main\")",
+      "Bash(curl -s http://localhost:8000/openapi.json)",
+      "Bash(curl -s -o /dev/null -w \"health: %{http_code}\\\\n\" http://localhost:8000/health)",
+      "Bash(curl -s -o /dev/null -w \"dev 5173: %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s http://localhost:8000/stories)",
+      "Bash(git restore *)",
+      "Bash(curl -s -o /dev/null -w \"frontend :5173 → %{http_code}\\\\n\" http://localhost:5173)",
+      "Bash(curl -s -o /dev/null -w \"backend  :8000 → %{http_code}\\\\n\" http://localhost:8000/health)",
+      "Bash(git commit *)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(break)",
+      "Bash(echo \"backend: $\\(curl -s http://localhost:8000/health\\)\")"
     ]
   }
 }

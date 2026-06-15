@@ -27,7 +27,6 @@ async def stream_writer(
     stream = await client.chat.completions.create(
         model=model_name,
         messages=messages,
-        temperature=0.85,
         stream=True,
     )
 

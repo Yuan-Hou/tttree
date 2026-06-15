@@ -8,6 +8,7 @@ import type {
   ProposalDraw,
   ProposalsResp,
   Snapshot,
+  StorySettings,
   StoryInfo,
   TurnContexts,
   TurnDraws,
@@ -109,6 +110,20 @@ export const retry = (id: string, entry: "director_a" | "writer" | "director_b")
 
 export const forkStory = (id: string) =>
   fetch(`/stories/${id}/fork`, { method: "POST", headers: json }).then((r) => r.json() as Promise<StoryInfo>);
+
+// ── 故事内设置:模型(各 agent 选模型 + 全局默认)──
+export const getSettings = (id: string) => jget<StorySettings>(`/story/${id}/settings`);
+
+export const saveSettings = (
+  id: string,
+  body: { default_model?: string; overrides?: Record<string, string> },
+) =>
+  fetch(`/story/${id}/settings`, { method: "PUT", headers: json, body: JSON.stringify(body) }).then(
+    async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      return r.json() as Promise<StorySettings>;
+    },
+  );
 
 // ── 故事内设置:知识库(整篇自由文本)──
 export const getKnowledge = (id: string) => jget<{ content: string }>(`/story/${id}/knowledge`);

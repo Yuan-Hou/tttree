@@ -39,7 +39,6 @@ async def run_director(
     response = await client.chat.completions.create(
         model=model_name,
         messages=messages,
-        temperature=0.3,
         response_format={"type": "json_object"},
     )
 

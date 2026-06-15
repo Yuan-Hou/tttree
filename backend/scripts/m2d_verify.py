@@ -45,11 +45,11 @@ async def usage_probe(blackboard: dict) -> None:
         return d.get("prompt_cache_hit_tokens"), d.get("prompt_cache_miss_tokens"), d.get("prompt_tokens")
 
     a_msgs = build_messages("director", history=[], blackboard=blackboard, user_action=action)
-    a = await client.chat.completions.create(model=settings.deepseek_model, messages=a_msgs, temperature=0.3, response_format={"type": "json_object"})
+    a = await client.chat.completions.create(model=settings.deepseek_model, messages=a_msgs, response_format={"type": "json_object"})
     print(f"  Director-A : hit/miss/total = {hitmiss(a.usage)}")
 
     w_msgs = build_messages("writer", history=[], blackboard=blackboard, user_action=action, writing_brief=brief)
-    w_stream = await client.chat.completions.create(model=settings.deepseek_model, messages=w_msgs, temperature=0.85, stream=True, stream_options={"include_usage": True})
+    w_stream = await client.chat.completions.create(model=settings.deepseek_model, messages=w_msgs, stream=True, stream_options={"include_usage": True})
     w_usage = None
     async for ch in w_stream:
         if ch.usage is not None:
@@ -57,7 +57,7 @@ async def usage_probe(blackboard: dict) -> None:
     print(f"  Writer     : hit/miss/total = {hitmiss(w_usage)}")
 
     b_msgs = build_messages("director_review", history=[], blackboard=blackboard, user_action=action, narrative="你静静站着,听风穿过树梢。", director_a_plan={"scene_intent": "stay"})
-    b = await client.chat.completions.create(model=settings.deepseek_model, messages=b_msgs, temperature=0.3, response_format={"type": "json_object"})
+    b = await client.chat.completions.create(model=settings.deepseek_model, messages=b_msgs, response_format={"type": "json_object"})
     print(f"  Director-B : hit/miss/total = {hitmiss(b.usage)}")
     return hitmiss(a.usage), hitmiss(w_usage), hitmiss(b.usage)
 

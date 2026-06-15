@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { GalleryEditor } from "./GalleryEditor";
 import { KnowledgeEditor } from "./KnowledgeEditor";
+import { ModelSettings } from "./ModelSettings";
 
 interface Props {
   storyId: string;
@@ -8,8 +9,9 @@ interface Props {
   onClose: () => void;
 }
 
-// 故事内设置的分区。子步二:知识库 / 图库;子步一的模型设置将在子步四并入这里。
+// 故事内设置的分区:模型 / 知识库 / 图库。都与故事绑定,随 fork 复制、随 delete 清理。
 const SECTIONS = [
+  { id: "model", label: "模型", hint: "各 agent 用哪个 LLM" },
   { id: "knowledge", label: "知识库", hint: "设定圣经 · 只注入导演 A" },
   { id: "gallery", label: "图库", hint: "参考图素材" },
 ] as const;
@@ -18,7 +20,7 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 
 /** 故事内设置:与故事绑定(随 fork 复制、随 delete 清理)的配置面板。覆盖层大视图,延续冷白基调。 */
 export function SettingsPanel({ storyId, title, onClose }: Props) {
-  const [section, setSection] = useState<SectionId>("knowledge");
+  const [section, setSection] = useState<SectionId>("model");
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -68,7 +70,9 @@ export function SettingsPanel({ storyId, title, onClose }: Props) {
 
           {/* 分区内容 */}
           <div className="flex min-h-0 flex-1 flex-col p-5">
-            {section === "knowledge" ? (
+            {section === "model" ? (
+              <ModelSettings storyId={storyId} />
+            ) : section === "knowledge" ? (
               <KnowledgeEditor storyId={storyId} />
             ) : (
               <GalleryEditor storyId={storyId} />

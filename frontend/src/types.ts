@@ -148,6 +148,19 @@ export interface PickedRef {
   purpose: string;
 }
 
+// ── 故事内设置:模型(子步一后端 → 子步四 UI)──
+export interface ModelChoice {
+  id: string;
+  label: string;
+  provider: string;
+}
+export interface StorySettings {
+  default_model: string; // 全局默认模型 id
+  overrides: Record<string, string>; // agent → 覆盖模型 id("" = 用全局默认)
+  effective: Record<string, string>; // agent → 实际生效模型 id
+  models: ModelChoice[]; // 可选模型清单
+}
+
 // ── 节点上下文(M4.5-B 读取接口 → M5-B HTTP 壳)──
 export interface ContextMessage {
   role: string;

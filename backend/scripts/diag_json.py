@@ -1,6 +1,6 @@
 """诊断:Director-A / Director-B 偶发 JSON 失败的根因。只观测、不修复。
 
-忠实复刻 run_director / run_director_review 的调用(同 build_messages、同 temperature=0.3、
+忠实复刻 run_director / run_director_review 的调用(同 build_messages
 同 response_format=json_object、同 model),但额外捕获 finish_reason / usage / 解析前 raw,
 以便区分:截断 / 非法JSON语法 / Pydantic校验 / 空黑板退化。
 用法(backend/ 下):python -m scripts.diag_json
@@ -32,7 +32,7 @@ failures = []  # 收集失败样本
 
 async def _create(messages):
     r = await get_client().chat.completions.create(
-        model=settings.deepseek_model, messages=messages, temperature=0.3,
+        model=settings.deepseek_model, messages=messages, 
         response_format={"type": "json_object"},
     )
     ch = r.choices[0]

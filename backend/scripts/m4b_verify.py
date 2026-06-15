@@ -114,7 +114,7 @@ async def main() -> None:
         msgs = build_messages("director", history=hist, blackboard=bb, user_action="(probe)")
         assert msgs[0]["content"].startswith("# 文风圣经")
         r = await get_client().chat.completions.create(
-            model=settings.deepseek_model, messages=msgs, temperature=0.3,
+            model=settings.deepseek_model, messages=msgs,
             response_format={"type": "json_object"},
         )
         u = r.usage.model_dump()

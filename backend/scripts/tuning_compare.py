@@ -59,7 +59,7 @@ async def run_director_capture(history, blackboard, user_action):
     client = get_client()
     messages = build_messages("director", history=history, blackboard=blackboard, user_action=user_action)
     resp = await client.chat.completions.create(
-        model=settings.deepseek_model, messages=messages, temperature=0.3,
+        model=settings.deepseek_model, messages=messages,
         response_format={"type": "json_object"},
     )
     raw = resp.choices[0].message.content or ""

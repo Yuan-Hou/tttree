@@ -139,7 +139,6 @@ async def run_illustrator(
     response = await client.chat.completions.create(
         model=model_name,
         messages=messages,
-        temperature=0.4,
         response_format={"type": "json_object"},
     )
 

@@ -63,8 +63,8 @@ def usage_line(tag, u):
     print(f"    [{tag}] prompt={u.prompt_tokens} cache_hit={hit} cache_miss={miss} completion={u.completion_tokens}")
 
 
-async def create(messages, *, json_mode, temperature):
-    kwargs = {"model": settings.deepseek_model, "messages": messages, "temperature": temperature}
+async def create(messages, *, json_mode):
+    kwargs = {"model": settings.deepseek_model, "messages": messages}
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     return await get_client().chat.completions.create(**kwargs)
@@ -99,8 +99,8 @@ async def main() -> None:
     print("\n===== Part 2:真实跑 A→Writer→B 各两次,看缓存(A 带知识库是否仍命中)=====")
     # A(带知识库)跑两次
     a_msgs = roles["Director-A"]
-    ra1 = await create(a_msgs, json_mode=True, temperature=0.3)
-    ra2 = await create(a_msgs, json_mode=True, temperature=0.3)
+    ra1 = await create(a_msgs, json_mode=True)
+    ra2 = await create(a_msgs, json_mode=True)
     a = json.loads(ra1.choices[0].message.content)
     print("  Director-A(上下文含知识库):")
     usage_line("A 第1次(暖)", ra1.usage)
@@ -109,8 +109,8 @@ async def main() -> None:
     # Writer(不含知识库)跑两次
     w_msgs = build_messages("writer", history=[], blackboard=BLACKBOARD, user_action=USER_ACTION,
                             writing_brief=a.get("writing_brief", ""), knowledge=kb)
-    rw1 = await create(w_msgs, json_mode=False, temperature=0.85)
-    rw2 = await create(w_msgs, json_mode=False, temperature=0.85)
+    rw1 = await create(w_msgs, json_mode=False)
+    rw2 = await create(w_msgs, json_mode=False)
     narrative = rw1.choices[0].message.content
     print("  Writer(上下文不含知识库):")
     usage_line("W 第1次", rw1.usage)
@@ -119,8 +119,8 @@ async def main() -> None:
     # Director-B(不含知识库)跑两次
     b_msgs = build_messages("director_review", history=[], blackboard=BLACKBOARD, user_action=USER_ACTION,
                             narrative=narrative, director_a_plan=a, knowledge=kb)
-    rb1 = await create(b_msgs, json_mode=True, temperature=0.3)
-    rb2 = await create(b_msgs, json_mode=True, temperature=0.3)
+    rb1 = await create(b_msgs, json_mode=True)
+    rb2 = await create(b_msgs, json_mode=True)
     print("  Director-B(上下文不含知识库):")
     usage_line("B 第1次", rb1.usage)
     usage_line("B 第2次", rb2.usage)

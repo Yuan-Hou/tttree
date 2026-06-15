@@ -24,7 +24,6 @@ from app.config import settings
 from app.llm.deepseek_client import get_client
 
 N = 8
-TEMPERATURE = 1.0  # 拉高温度让 a 充分随机,更能检验「链」在不同取值下是否稳
 
 FIELDS_DESC = (
     '字段:\n'
@@ -60,7 +59,6 @@ async def run_variant(name: str, prompt: str) -> dict:
         resp = await client.chat.completions.create(
             model=settings.deepseek_model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=TEMPERATURE,
             response_format={"type": "json_object"},
         )
         raw = (resp.choices[0].message.content or "").strip()
@@ -81,7 +79,7 @@ async def run_variant(name: str, prompt: str) -> dict:
 
 
 async def main() -> None:
-    print(f"model={settings.deepseek_model}  temp={TEMPERATURE}  N={N}/变体\n")
+    print(f"model={settings.deepseek_model}  N={N}/变体\n")
     for name, prompt in PROMPTS.items():
         res = await run_variant(name, prompt)
         print(f"===== 变体 [{name}] =====")

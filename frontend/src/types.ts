@@ -54,7 +54,8 @@ export interface Snapshot {
   story_id: string;
   title: string;
   blackboard: Blackboard;
-  scenes_images: Record<string, string[]>;
+  scenes_images: Record<string, string[]>; // 正典图(进黑板的提案图)
+  scenes_drafts?: Record<string, string[]>; // 用户手动草稿图(origin=user_initiated,不进黑板)
   history: HistoryTurn[];
 }
 
@@ -79,8 +80,10 @@ export interface Draft {
   scene: string;
   kind: string;
   prompt_text: string;
-  refs: DraftRef[];
+  refs: DraftRef[]; // 绘图 Agent 建议的初始引用清单
   history: { semantic_name: string; image_path: string }[];
+  library?: LibraryAsset[]; // 参考图库(RefPicker 来源一)
+  past_images?: PastImage[]; // 过往绘制结果全列(RefPicker 来源二,含手动草稿)
   warn_redraw_base?: boolean; // 重绘 new_scene 且场景已有 variant → 需警告
   draw_turn?: number;
   proposal_id?: number | null;

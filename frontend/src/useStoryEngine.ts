@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
-import type { AgentStep, Blackboard, Draft, DrawProposal, StepStatus, StoryInfo } from "./types";
+import type { AgentStep, Blackboard, Draft, DraftRef, DrawProposal, PickedRef, StepStatus, StoryInfo } from "./types";
+
+/** 绘图 Agent 建议的引用清单(DraftRef)→ 用户可编辑的选择(PickedRef)。 */
+const toPicked = (refs: DraftRef[]): PickedRef[] =>
+  refs.map((r) =>
+    r.source === "reference_asset"
+      ? { source: "reference_asset", asset_id: r.asset_id, semantic_name: r.semantic_name, purpose: r.purpose }
+      : { source: "history_image", image_path: r.image_path, semantic_name: r.semantic_name, purpose: r.purpose },
+  );
 
 export type LiveStages = Record<AgentStep, StepStatus>;
 const STAGES_AT_SUBMIT: LiveStages = {
@@ -24,6 +32,7 @@ export interface DraftCard {
   key: string;
   draft: Draft;
   prompt: string;
+  picked: PickedRef[]; // 用户当前选定的参考图(可编辑;初始为 Agent 建议)
   source: string;
   status: "writing" | "review" | "submitted" | "failed";
   note?: string;
@@ -54,6 +63,7 @@ export function useStoryEngine() {
   const [blackboard, setBlackboard] = useState<Blackboard>({});
   const [turns, setTurns] = useState<TurnView[]>([]);
   const [scenesImages, setScenesImages] = useState<Record<string, string[]>>({});
+  const [scenesDrafts, setScenesDrafts] = useState<Record<string, string[]>>({}); // 手动草稿图(非正式)
   const [proposals, setProposals] = useState<DrawProposal[]>([]);
   const [drafts, setDrafts] = useState<DraftCard[]>([]);
   const [pending, setPending] = useState<PendingImage[]>([]);
@@ -90,6 +100,7 @@ export function useStoryEngine() {
     setTitle(snap.title);
     setBlackboard(snap.blackboard ?? {});
     setScenesImages({ ...scenesImagesOf(snap.blackboard ?? {}), ...(snap.scenes_images ?? {}) });
+    setScenesDrafts(snap.scenes_drafts ?? {});
     setTurns(
       (snap.history ?? []).map((t) => ({
         key: `h${t.turn_index}`,
@@ -136,6 +147,7 @@ export function useStoryEngine() {
         setBlackboard({});
         setTurns([]);
         setScenesImages({});
+        setScenesDrafts({});
         setProposals([]);
         setDrafts([]);
         setPending([]);
@@ -202,7 +214,7 @@ export function useStoryEngine() {
     if (!id) return;
     const key = uid();
     setDrafts((d) => [
-      { key, draft: { type: "draft_ready", draft_id: "", scene, kind: "", prompt_text: "", refs: [], history: [] }, prompt: "", source, status: "writing" },
+      { key, draft: { type: "draft_ready", draft_id: "", scene, kind: "", prompt_text: "", refs: [], history: [] }, prompt: "", picked: [], source, status: "writing" },
       ...d,
     ]);
     try {
@@ -214,7 +226,7 @@ export function useStoryEngine() {
         return;
       }
       setDrafts((d) =>
-        d.map((c) => (c.key === key ? { ...c, draft, prompt: draft.prompt_text, status: "review", warn: draft.warn_redraw_base } : c)),
+        d.map((c) => (c.key === key ? { ...c, draft, prompt: draft.prompt_text, picked: toPicked(draft.refs), status: "review", warn: draft.warn_redraw_base } : c)),
       );
     } catch (e) {
       setDrafts((d) => d.map((c) => (c.key === key ? { ...c, status: "failed", note: String(e) } : c)));
@@ -227,7 +239,7 @@ export function useStoryEngine() {
     if (!id) return;
     const key = uid();
     setDrafts((d) => [
-      { key, draft: { type: "draft_ready", draft_id: "", scene, kind: "", prompt_text: "", refs: [], history: [] }, prompt: "", source: "director_b_proposal", status: "writing", proposalId },
+      { key, draft: { type: "draft_ready", draft_id: "", scene, kind: "", prompt_text: "", refs: [], history: [] }, prompt: "", picked: [], source: "director_b_proposal", status: "writing", proposalId },
       ...d,
     ]);
     try {
@@ -237,7 +249,7 @@ export function useStoryEngine() {
         return;
       }
       setDrafts((d) =>
-        d.map((c) => (c.key === key ? { ...c, draft, prompt: draft.prompt_text, status: "review", warn: draft.warn_redraw_base, proposalId } : c)),
+        d.map((c) => (c.key === key ? { ...c, draft, prompt: draft.prompt_text, picked: toPicked(draft.refs), status: "review", warn: draft.warn_redraw_base, proposalId } : c)),
       );
     } catch (e) {
       setDrafts((d) => d.map((c) => (c.key === key ? { ...c, status: "failed", note: String(e) } : c)));
@@ -246,6 +258,10 @@ export function useStoryEngine() {
 
   const editDraftPrompt = useCallback((key: string, prompt: string) => {
     setDrafts((d) => d.map((c) => (c.key === key ? { ...c, prompt } : c)));
+  }, []);
+
+  const setDraftRefs = useCallback((key: string, picked: PickedRef[]) => {
+    setDrafts((d) => d.map((c) => (c.key === key ? { ...c, picked } : c)));
   }, []);
 
   const dropDraft = useCallback((key: string) => {
@@ -259,6 +275,7 @@ export function useStoryEngine() {
     if (curRef.current !== id) return;
     setBlackboard(snap.blackboard ?? {});
     setScenesImages({ ...scenesImagesOf(snap.blackboard ?? {}), ...(snap.scenes_images ?? {}) });
+    setScenesDrafts(snap.scenes_drafts ?? {});
   }, []);
 
   const confirmDraft = useCallback(
@@ -269,12 +286,14 @@ export function useStoryEngine() {
       // 卡片转「后台生成中」并最小化;场景画廊放占位。文本线照常可用。
       setDrafts((d) => d.map((c) => (c.key === key ? { ...c, status: "submitted", note: "已提交,后台生成中" } : c)));
       try {
-        await api.confirmDraw(id, { draft_id: card.draft.draft_id, prompt: card.prompt }, (ev) => {
+        await api.confirmDraw(id, { draft_id: card.draft.draft_id, prompt: card.prompt, references: card.picked }, (ev) => {
           if (ev.type === "image_generating")
             setPending((p) => [...p, { request_id: ev.request_id, scene: ev.scene, status: "generating" }]);
           else if (ev.type === "image_ready") {
             setPending((p) => p.filter((x) => x.request_id !== ev.request_id));
-            setScenesImages((prev) => ({
+            // 手动图(user_initiated)进「非正式」草稿桶,不混入正典 image_paths;提案图进正典桶。
+            const bucket = card.source === "user_initiated" ? setScenesDrafts : setScenesImages;
+            bucket((prev) => ({
               ...prev,
               [ev.scene]: [...(prev[ev.scene] ?? []).filter((u) => u !== ev.image_path), ev.image_path],
             }));
@@ -400,9 +419,9 @@ export function useStoryEngine() {
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   return {
-    stories, curId, title, blackboard, turns, scenesImages, proposals, drafts, pending, turnStreaming,
+    stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, proposals, drafts, pending, turnStreaming,
     refreshStories, selectStory, createStory, removeStory, submitTurn,
-    openDraft, openDraftForProposal, editDraftPrompt, dropDraft, confirmDraft, decideDraft, startDraftFromProposal,
+    openDraft, openDraftForProposal, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, startDraftFromProposal,
     // 工作台 + 时间控制
     scopeOpen, scopeTurn, setScopeTurn, openScope, closeScope,
     liveStages, liveTurn, retrying, latestTurn, contextsVersion, drawsVersion,

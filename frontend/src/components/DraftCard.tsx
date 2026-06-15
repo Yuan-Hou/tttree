@@ -1,18 +1,20 @@
-import { imgUrl } from "../api";
+import type { PickedRef } from "../types";
 import type { DraftCard as Card } from "../useStoryEngine";
+import { RefPicker } from "./RefPicker";
 import { Button, Tag } from "./ui";
 
 interface Props {
   card: Card;
   onEditPrompt: (key: string, prompt: string) => void;
+  onSetRefs: (key: string, picked: PickedRef[]) => void;
   onConfirm: (key: string) => void;
   onReuse: (key: string) => void;
   onSkip: (key: string) => void;
   onDismiss: (key: string) => void;
 }
 
-/** 人在回路的绘图稿卡:写稿中 → 审阅(可编辑提示词 + 参考图)→ 确认出图 / 复用 / 跳过。 */
-export function DraftCard({ card, onEditPrompt, onConfirm, onReuse, onSkip, onDismiss }: Props) {
+/** 人在回路的绘图稿卡:写稿中 → 审阅(可编辑提示词 + 自由选择参考图)→ 确认出图 / 复用 / 跳过。 */
+export function DraftCard({ card, onEditPrompt, onSetRefs, onConfirm, onReuse, onSkip, onDismiss }: Props) {
   const { draft } = card;
 
   if (card.status === "writing")
@@ -69,23 +71,17 @@ export function DraftCard({ card, onEditPrompt, onConfirm, onReuse, onSkip, onDi
         className="mt-1.5 w-full resize-y rounded-lg border border-line-strong bg-paper px-3 py-2 text-[12.5px] leading-relaxed text-ink focus:border-accent focus:outline-none"
       />
 
-      {draft.refs.length > 0 && (
-        <div className="mt-3">
-          <div className="font-mono text-[11px] text-ink-faint">参考图(语义名)</div>
-          <div className="mt-2 flex flex-wrap gap-2.5">
-            {draft.refs.map((r, i) => (
-              <figure key={i} className="w-[78px]" title={r.purpose}>
-                {r.preview_path ? (
-                  <img src={imgUrl(r.preview_path)} alt={r.semantic_name} className="h-[52px] w-[78px] rounded-md border border-line object-cover" />
-                ) : (
-                  <div className="flex h-[52px] w-[78px] items-center justify-center rounded-md border border-dashed border-line-strong text-[10px] text-ink-faint">无图</div>
-                )}
-                <figcaption className="mt-1 truncate text-[10.5px] text-ink-soft">{r.semantic_name}</figcaption>
-              </figure>
-            ))}
-          </div>
+      <div className="mt-3">
+        <div className="font-mono text-[11px] text-ink-faint">参考图(自由选择 · 可增删)</div>
+        <div className="mt-2">
+          <RefPicker
+            library={draft.library ?? []}
+            pastImages={draft.past_images ?? []}
+            value={card.picked}
+            onChange={(v) => onSetRefs(card.key, v)}
+          />
         </div>
-      )}
+      </div>
 
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         <Button variant="primary" onClick={() => onConfirm(card.key)}>

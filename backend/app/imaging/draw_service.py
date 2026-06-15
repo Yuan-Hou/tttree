@@ -11,7 +11,7 @@ from app.agents.illustrator import build_illustrator_messages, render_reference_
 from app.assets.reference_store import list_references
 from app.db.models import ImageGen
 from app.imaging.executor import ImageGenError, ResolvedRefs, execute_image, resolve_references
-from app.imaging.pipeline import record_generation
+from app.imaging.pipeline import DRAFT_ORIGIN, is_canon_origin, record_generation
 from app.models.schemas import IllustratorDraft, ReferenceRef
 from app.stories.settings_store import get_or_create_settings, resolve_agent_model
 
@@ -21,7 +21,12 @@ _HISTORY_TAGS = ["初见", "再访", "其后"]
 async def build_history_catalog(
     session: AsyncSession, story_id: str, scene_slug: str, scene_name: str
 ) -> list[dict]:
-    """把该场景已有的历史生成图,用『场景名+状态』式语义名列出(不用位置序号)。"""
+    """绘图 Agent 的**自动候选池**:该场景已有的历史生成图,用『场景名+状态』式语义名列出。
+
+    绘图归属(本次修整):排除 origin=user_initiated 的用户手动草稿 —— 手动图对写稿 Agent 隐身,
+    不进它的连贯参考候选。这是「喂 Agent 的候选(排手动图)」一侧;「给用户手动选的过往结果列表」
+    是另一条独立查询(draw_router.get_proposal_draw 的 past_images,全列、不过滤),两池子分开。
+    """
     rows = (
         await session.execute(
             select(ImageGen)
@@ -29,6 +34,7 @@ async def build_history_catalog(
                 ImageGen.story_id == story_id,
                 ImageGen.scene_slug == scene_slug,
                 ImageGen.kind != "reuse",
+                ImageGen.origin != DRAFT_ORIGIN,  # 手动草稿不进 Agent 候选池
             )
             .order_by(ImageGen.id)
         )
@@ -166,6 +172,7 @@ async def picture_from_refs(
         output_path=result.output_path,
         origin=origin,
         source_turn=source_turn,
+        append_to_blackboard=is_canon_origin(origin),  # 正典进黑板;手动草稿不进
     )
     return {"scene": scene_slug, "output_path": result.output_path, "api_call": result.api_call, "imagegen_id": ig.id}
 
@@ -236,6 +243,7 @@ async def apply_decision(
             output_path=result.output_path,
             origin=origin,
             source_turn=source_turn,
+            append_to_blackboard=is_canon_origin(origin),  # 正典进黑板;手动草稿(user_initiated)不进
         )
         return {
             "action": "confirm",

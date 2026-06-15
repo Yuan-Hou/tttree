@@ -5,6 +5,7 @@ import { Composer } from "./components/Composer";
 import { StatePanel } from "./components/StatePanel";
 import { ScenesPanel } from "./components/ScenesPanel";
 import { DrawDeck } from "./components/DrawDeck";
+import { ManualDeck } from "./components/ManualDeck";
 import { Workbench } from "./components/Workbench";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Eyebrow } from "./components/ui";
@@ -81,20 +82,20 @@ export function App() {
             <ScenesPanel
               blackboard={e.blackboard}
               scenesImages={e.scenesImages}
+              scenesDrafts={e.scenesDrafts}
               pending={e.pending}
               onDraw={(slug) => e.openDraft(slug, "user_initiated")}
             />
-            <DrawDeck
-              storyId={e.curId}
-              drawsVersion={e.drawsVersion}
+            <ManualDeck
               drafts={e.drafts}
-              onReload={e.reloadScope}
               onEditPrompt={e.editDraftPrompt}
+              onSetRefs={e.setDraftRefs}
               onConfirm={e.confirmDraft}
               onReuse={(k) => e.decideDraft(k, "reuse")}
               onSkip={(k) => e.decideDraft(k, "skip")}
               onDismiss={e.dropDraft}
             />
+            <DrawDeck storyId={e.curId} drawsVersion={e.drawsVersion} onReload={e.reloadScope} />
           </>
         ) : (
           <div className="p-6">

@@ -7,6 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Blackboard, ImageGen
 
+# 绘图归属:ImageGen.origin 决定待遇。
+#   director_b_proposal = 故事正典:进黑板 image_paths、进绘图 Agent 候选池、参与连贯参考。
+#   user_initiated      = 用户私人草稿:不进黑板、对 Agent 隐身;仅用户可见、可手动引用。
+# 一律按 origin 字段判定,不靠其他启发式。
+CANON_ORIGIN = "director_b_proposal"
+DRAFT_ORIGIN = "user_initiated"
+
+
+def is_canon_origin(origin: str) -> bool:
+    """该来源的图是否为故事正典(进黑板 + 进 Agent 候选池)。"""
+    return origin == CANON_ORIGIN
+
 
 async def record_generation(
     session: AsyncSession,

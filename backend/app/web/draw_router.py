@@ -193,6 +193,13 @@ async def post_draw(story_id: str, req: DrawReq) -> dict:
             draw_request=request, history=history, kind=kind,
         )
         assets = await list_references(s, story_id)
+        # 用户手动选参考图的「过往绘制结果」列表:整故事所有 ImageGen(含手动草稿),不按轮截断、不过滤。
+        # 与喂 Agent 的候选池(prepare_draft 内 build_history_catalog,排手动图)是两条独立查询。
+        past = (
+            await s.execute(
+                select(ImageGen).where(ImageGen.story_id == story_id, ImageGen.output_path != "").order_by(ImageGen.id)
+            )
+        ).scalars().all()
 
     draft_id = uuid.uuid4().hex
     _PENDING[draft_id] = _PendingDraft(
@@ -214,6 +221,9 @@ async def post_draw(story_id: str, req: DrawReq) -> dict:
              "category": a.category, "file_path": a.file_path}
             for a in assets
         ],
+        # 自由选择参考图的第二来源(过往绘制结果,全列):供手动绘图稿的 RefPicker。
+        "past_images": [{"imagegen_id": ig.id, "scene_slug": ig.scene_slug, "kind": ig.kind,
+                         "output_path": ig.output_path} for ig in past],
     }
 
 

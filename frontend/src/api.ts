@@ -195,9 +195,10 @@ async function streamSSE<E>(url: string, body: unknown, onEvent: (e: E) => void)
 export const streamTurn = (id: string, userInput: string, onEvent: (e: TurnEvent) => void) =>
   streamSSE<TurnEvent>(`/story/${id}/turn`, { user_input: userInput }, onEvent);
 
-/** confirm 出图(花钱)→ 短命 SSE 流。confirm 是唯一通往真实出图的路径。 */
+/** confirm 出图(花钱)→ 短命 SSE 流。confirm 是唯一通往真实出图的路径。
+ *  references = 用户编辑后的参考图清单(省略则用 Agent 原始清单)。 */
 export const confirmDraw = (
   id: string,
-  body: { draft_id: string; prompt: string },
+  body: { draft_id: string; prompt: string; references?: PickedRef[] },
   onEvent: (e: DrawEvent) => void,
 ) => streamSSE<DrawEvent>(`/story/${id}/draw/confirm`, { ...body, decision: "confirm" }, onEvent);

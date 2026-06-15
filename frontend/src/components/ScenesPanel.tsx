@@ -7,14 +7,17 @@ import { Button, Eyebrow, Tag } from "./ui";
 interface Props {
   blackboard: Blackboard;
   scenesImages: Record<string, string[]>;
+  scenesDrafts: Record<string, string[]>; // 手动草稿图(非正式,不进黑板)
   pending: PendingImage[];
   onDraw: (slug: string) => void;
 }
 
-export function ScenesPanel({ blackboard, scenesImages, pending, onDraw }: Props) {
+export function ScenesPanel({ blackboard, scenesImages, scenesDrafts, pending, onDraw }: Props) {
   const lightbox = useLightbox();
   const scenes = blackboard.scenes ?? {};
-  const slugs = Array.from(new Set([...Object.keys(scenes), ...Object.keys(scenesImages)]));
+  const slugs = Array.from(
+    new Set([...Object.keys(scenes), ...Object.keys(scenesImages), ...Object.keys(scenesDrafts)]),
+  );
   const current = blackboard.story_meta?.current_scene;
 
   return (
@@ -28,6 +31,7 @@ export function ScenesPanel({ blackboard, scenesImages, pending, onDraw }: Props
           {slugs.map((slug) => {
             const sc = scenes[slug] ?? {};
             const imgs = scenesImages[slug] ?? sc.image_paths ?? [];
+            const drafts = scenesDrafts[slug] ?? [];
             const waiting = pending.filter((p) => p.scene === slug);
             return (
               <div
@@ -47,19 +51,37 @@ export function ScenesPanel({ blackboard, scenesImages, pending, onDraw }: Props
                   </p>
                 )}
 
-                {(imgs.length > 0 || waiting.length > 0) && (
+                {(imgs.length > 0 || drafts.length > 0 || waiting.length > 0) && (
                   <div className="mt-2.5 flex flex-col gap-2">
                     {imgs.map((p) => (
-                      <img
-                        key={p}
-                        src={imgUrl(p)}
-                        alt={sc.name ?? slug}
-                        onClick={() => lightbox(imgUrl(p), sc.name ?? slug)}
-                        className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line"
-                      />
+                      <div key={p} className="relative">
+                        <img
+                          src={imgUrl(p)}
+                          alt={sc.name ?? slug}
+                          onClick={() => lightbox(imgUrl(p), sc.name ?? slug)}
+                          className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line"
+                        />
+                        <span className="absolute left-2 top-2 rounded-[5px] bg-accent/85 px-1.5 py-px font-mono text-[10px] text-white">
+                          正典
+                        </span>
+                      </div>
                     ))}
                     {waiting.map((w) => (
                       <Placeholder key={w.request_id} pending={w} />
+                    ))}
+                    {/* 手动草稿:视觉明确「非正式」,与进黑板的正典图区分 */}
+                    {drafts.map((p) => (
+                      <div key={p} className="relative">
+                        <img
+                          src={imgUrl(p)}
+                          alt={`${sc.name ?? slug}(非正式)`}
+                          onClick={() => lightbox(imgUrl(p), `${sc.name ?? slug} · 手动草稿`)}
+                          className="surface-in w-full cursor-zoom-in rounded-[10px] border border-dashed border-line-strong opacity-90"
+                        />
+                        <span className="absolute left-2 top-2 rounded-[5px] bg-ink/70 px-1.5 py-px font-mono text-[10px] text-paper">
+                          非正式 · 手动草稿
+                        </span>
+                      </div>
                     ))}
                   </div>
                 )}

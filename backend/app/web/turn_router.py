@@ -20,8 +20,9 @@ from app.agents.context import Message, build_messages
 from app.agents.director import DirectorOutputError, run_director
 from app.agents.director_review import DirectorReviewError, run_director_review
 from app.agents.writer import stream_writer
-from app.db.models import Blackboard, Story, Turn
+from app.db.models import Blackboard, ImageGen, Story, Turn
 from app.db.session import async_session
+from app.imaging.pipeline import DRAFT_ORIGIN
 from app.knowledge.store import get_knowledge
 from app.state.reducer import reduce_turn
 from app.stories.settings_store import get_or_create_settings, resolve_agent_model
@@ -153,16 +154,33 @@ async def get_snapshot(story_id: str) -> dict:
                 select(Turn).where(Turn.story_id == story_id).order_by(Turn.turn_index)
             )
         ).scalars().all()
+        # 用户手动草稿图(origin=user_initiated):不在黑板里,单独从 ImageGen 按场景取出,
+        # 供「场景与画」标注为「非正式」展示。正典图(进黑板)走 scenes_images。
+        draft_rows = (
+            await s.execute(
+                select(ImageGen)
+                .where(
+                    ImageGen.story_id == story_id,
+                    ImageGen.origin == DRAFT_ORIGIN,
+                    ImageGen.output_path != "",
+                )
+                .order_by(ImageGen.id)
+            )
+        ).scalars().all()
 
     scenes_images = {
         slug: scene.get("image_paths", [])
         for slug, scene in (blackboard.get("scenes") or {}).items()
     }
+    scenes_drafts: dict[str, list[str]] = {}
+    for ig in draft_rows:
+        scenes_drafts.setdefault(ig.scene_slug, []).append(ig.output_path)
     return {
         "story_id": story_id,
         "title": story.title,
         "blackboard": blackboard,
         "scenes_images": scenes_images,
+        "scenes_drafts": scenes_drafts,
         "history": [
             {
                 "turn_index": t.turn_index,

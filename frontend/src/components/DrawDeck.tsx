@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { getStoryProposals, imgUrl } from "../api";
 import type { ProposalRow, ProposalsResp, SceneMeta } from "../types";
-import type { DraftCard as Card } from "../useStoryEngine";
-import { DraftCard } from "./DraftCard";
 import { useLightbox } from "./Lightbox";
 import { PictureNodeEditor } from "./PictureNodeEditor";
 import { Eyebrow, Tag } from "./ui";
@@ -10,17 +8,12 @@ import { Eyebrow, Tag } from "./ui";
 interface Props {
   storyId: string;
   drawsVersion: number;
-  drafts: Card[]; // 临时(场景卡)绘图稿,仍走旧流程
   onReload: () => void; // 出图后刷新(bump drawsVersion + 快照)
-  onEditPrompt: (key: string, prompt: string) => void;
-  onConfirm: (key: string) => void;
-  onReuse: (key: string) => void;
-  onSkip: (key: string) => void;
-  onDismiss: (key: string) => void;
 }
 
-/** 绘图台:按场景聚合的绘图待办。挑一条 pending/done → 在此走画图节点(写稿若缺→出图,
- *  含参考图自由选择)。门控:variant 无基底灰禁;重绘 new_scene 带警告。 */
+/** 绘图台:导演 B 提案的正典待办,按场景聚合。挑一条 pending/done → 在此走画图节点(写稿若缺→出图,
+ *  含参考图自由选择)。门控:variant 无基底灰禁;重绘 new_scene 带警告。
+ *  注:用户手动绘图稿不在这里,独立于「手动绘图 · 私人草稿」(ManualDeck)。 */
 export function DrawDeck(p: Props) {
   const [data, setData] = useState<ProposalsResp | null>(null);
   const [sel, setSel] = useState<{ id: number; scene: string } | null>(null);
@@ -41,7 +34,7 @@ export function DrawDeck(p: Props) {
 
   return (
     <section className="px-6 py-5">
-      <Eyebrow>绘图台 · 按场景</Eyebrow>
+      <Eyebrow>绘图台 · 按场景(正典)</Eyebrow>
 
       {/* 选中的待办 → 画图节点(写稿若缺→出图 + 参考图自由选择) */}
       {sel && (
@@ -57,15 +50,6 @@ export function DrawDeck(p: Props) {
             canAct
             onDone={p.onReload}
           />
-        </div>
-      )}
-
-      {/* 临时(场景卡)绘图稿 */}
-      {p.drafts.length > 0 && (
-        <div className="mt-3.5 flex flex-col gap-3">
-          {p.drafts.map((c) => (
-            <DraftCard key={c.key} card={c} onEditPrompt={p.onEditPrompt} onConfirm={p.onConfirm} onReuse={p.onReuse} onSkip={p.onSkip} onDismiss={p.onDismiss} />
-          ))}
         </div>
       )}
 

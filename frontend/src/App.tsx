@@ -126,7 +126,13 @@ export function App() {
               onSkip={(k) => e.decideDraft(k, "skip")}
               onDismiss={e.dropDraft}
             />
-            <DrawDeck storyId={e.curId} drawsVersion={e.drawsVersion} onReload={e.reloadScope} />
+            <DrawDeck
+              storyId={e.curId}
+              drawsVersion={e.drawsVersion}
+              onReload={e.reloadScope}
+              onWriting={e.onWriting}
+              onGenerating={e.onGenerating}
+            />
           </>
         ) : (
           <div className="p-6">

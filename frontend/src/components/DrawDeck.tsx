@@ -9,6 +9,8 @@ interface Props {
   storyId: string;
   drawsVersion: number;
   onReload: () => void; // 出图后刷新(bump drawsVersion + 快照)
+  onWriting?: (proposalId: number, on: boolean) => void; // 提升到 engine 的共享写稿态,工作台节点据此点亮
+  onGenerating?: (proposalId: number, on: boolean) => void; // 同上,绘图态(按 proposal_id 索引)
 }
 
 /** 绘图台:导演 B 提案的正典待办,按场景聚合。挑一条 pending/done → 在此走画图节点(写稿若缺→出图,
@@ -49,6 +51,8 @@ export function DrawDeck(p: Props) {
             proposalId={sel.id}
             canAct
             onDone={p.onReload}
+            onWriting={p.onWriting}
+            onGenerating={p.onGenerating}
           />
         </div>
       )}

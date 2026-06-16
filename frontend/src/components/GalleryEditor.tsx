@@ -189,7 +189,7 @@ function RefCard({ storyId, asset, onChanged }: { storyId: string; asset: Librar
       <img
         src={imgUrl(asset.file_path)}
         alt={asset.label}
-        onClick={() => lightbox(imgUrl(asset.file_path), asset.label)}
+        onClick={() => lightbox([{ src: imgUrl(asset.file_path), alt: asset.label }], 0)}
         className="h-[76px] w-[104px] shrink-0 cursor-zoom-in rounded-lg border border-line object-cover"
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">

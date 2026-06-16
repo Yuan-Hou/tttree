@@ -1,3 +1,4 @@
+import { useCallback, useMemo, useState } from "react";
 import { useStoryEngine } from "./useStoryEngine";
 import { Bookshelf } from "./components/Bookshelf";
 import { ReadingColumn } from "./components/ReadingColumn";
@@ -8,14 +9,33 @@ import { DrawDeck } from "./components/DrawDeck";
 import { ManualDeck } from "./components/ManualDeck";
 import { Workbench } from "./components/Workbench";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { SceneMap } from "./components/SceneMap";
 import { Eyebrow } from "./components/ui";
 
 export function App() {
   const e = useStoryEngine();
   const chapters = e.turns.length;
 
+  // 点地图实线 → 滚动对话列到对应轮的开头。对话与地图左右并列、始终挂载,直接滚即可。
+  const jumpToTurn = useCallback((turnIndex: number) => {
+    document.getElementById(`turn-${turnIndex}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  // 单击对话区 → 让地图聚焦该轮落点场景节点(放大 + 翻到对应图)。nonce 保证连点同一轮也重触发。
+  const [focusReq, setFocusReq] = useState<{ turnIndex: number; nonce: number } | null>(null);
+  const focusTurnOnMap = useCallback((turnIndex: number) => {
+    setFocusReq({ turnIndex, nonce: Date.now() });
+  }, []);
+
+  // 地图随故事推进/新出图自动刷新:轮数、正典图总数、绘图版本、当前场景任一变 → 重取地图
+  const canonImageCount = useMemo(
+    () => Object.values(e.scenesImages).reduce((a, v) => a + v.length, 0),
+    [e.scenesImages],
+  );
+  const mapRefreshKey = `${e.turns.length}|${canonImageCount}|${e.drawsVersion}|${e.blackboard?.story_meta?.current_scene ?? ""}`;
+
   return (
-    <div className="grid h-full grid-cols-[248px_minmax(0,1fr)_344px] bg-paper text-ink">
+    <div className="grid h-full grid-cols-[248px_minmax(0,1fr)_minmax(0,1fr)_344px] bg-paper text-ink">
       {/* ── 左:书架 ── */}
       <aside className="flex min-h-0 flex-col border-r border-line bg-surface">
         <Bookshelf
@@ -66,13 +86,24 @@ export function App() {
 
         {e.curId ? (
           <>
-            <ReadingColumn turns={e.turns} />
+            <ReadingColumn turns={e.turns} onTurnClick={focusTurnOnMap} />
             <Composer disabled={!e.curId} streaming={e.turnStreaming} onSubmit={e.submitTurn} />
           </>
         ) : (
           <EmptyReading />
         )}
       </main>
+
+      {/* ── 地图:与对话左右并列的常驻列 ── */}
+      <section className="flex min-h-0 flex-col border-l border-line bg-paper">
+        {e.curId ? (
+          <SceneMap storyId={e.curId} onJumpToTurn={jumpToTurn} refreshKey={mapRefreshKey} focusReq={focusReq} />
+        ) : (
+          <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-ink-faint">
+            选一卷故事,这里会画出场景地图。
+          </div>
+        )}
+      </section>
 
       {/* ── 右:此刻 / 场景与画 / 绘图台 ── */}
       <aside className="flex min-h-0 flex-col gap-0 overflow-y-auto border-l border-line bg-surface">

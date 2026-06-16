@@ -4,16 +4,50 @@ import { Tag } from "./ui";
 
 /** 阅读列 = 界面主角。开放的冷白空间,叙事在舒适的行宽里成块呼吸;
  *  左侧一根「树干」发丝线,每一拍挂一个生长节点 —— 故事正向下生长。 */
-export function ReadingColumn({ turns }: { turns: TurnView[] }) {
+export function ReadingColumn({
+  turns,
+  onTurnClick,
+}: {
+  turns: TurnView[];
+  onTurnClick?: (turnIndex: number) => void;
+}) {
   const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const lastActive = useRef<number | null>(null);
+  const rafPending = useRef(false);
   const streamingText = turns.length ? turns[turns.length - 1] : null;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [turns.length, streamingText?.narrative]);
 
+  // 滚动联动:占据「页面中线」的那一轮即当前轮 —— 某轮分界线越过中线就切到对应节点聚焦。
+  const onScroll = () => {
+    if (!onTurnClick || rafPending.current) return;
+    rafPending.current = true;
+    requestAnimationFrame(() => {
+      rafPending.current = false;
+      const cont = scrollRef.current;
+      if (!cont) return;
+      const cr = cont.getBoundingClientRect();
+      const mid = cr.top + cr.height / 2;
+      let active: number | null = turns[0]?.turn_index ?? null;
+      for (const t of turns) {
+        if (t.turn_index == null) continue;
+        const el = document.getElementById(`turn-${t.turn_index}`);
+        if (!el) continue;
+        if (el.getBoundingClientRect().top <= mid) active = t.turn_index; // 顶部已过中线 → 候选
+        else break; // 顺序排列,之后各轮顶部都在中线下方
+      }
+      if (active != null && active !== lastActive.current) {
+        lastActive.current = active;
+        onTurnClick(active);
+      }
+    });
+  };
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[640px] px-10 pb-10 pt-8">
         {turns.length === 0 ? (
           <p className="pt-10 text-center font-serif text-[17px] text-ink-faint">
@@ -25,7 +59,7 @@ export function ReadingColumn({ turns }: { turns: TurnView[] }) {
             <div className="absolute bottom-2 left-[5px] top-2 w-px bg-line" aria-hidden />
             <div className="flex flex-col">
               {turns.map((t, i) => (
-                <TurnBlock key={t.key} turn={t} latest={i === turns.length - 1} />
+                <TurnBlock key={t.key} turn={t} latest={i === turns.length - 1} onClick={onTurnClick} />
               ))}
             </div>
           </div>
@@ -36,9 +70,27 @@ export function ReadingColumn({ turns }: { turns: TurnView[] }) {
   );
 }
 
-function TurnBlock({ turn, latest }: { turn: TurnView; latest: boolean }) {
+function TurnBlock({
+  turn,
+  latest,
+  onClick,
+}: {
+  turn: TurnView;
+  latest: boolean;
+  onClick?: (turnIndex: number) => void;
+}) {
+  // 单击该轮 → 让地图聚焦对应场景节点。选中文字时不触发(避免劫持划词)。
+  const handleClick = () => {
+    if (turn.turn_index == null || !onClick) return;
+    if ((window.getSelection()?.toString() ?? "") !== "") return;
+    onClick(turn.turn_index);
+  };
   return (
-    <article className="relative pb-9 pl-7">
+    <article
+      id={turn.turn_index != null ? `turn-${turn.turn_index}` : undefined}
+      onClick={handleClick}
+      className={`relative scroll-mt-6 pb-9 pl-7 ${onClick ? "cursor-pointer" : ""}`}
+    >
       {/* 生长节点 */}
       <span
         className={`absolute left-0 top-[5px] h-[11px] w-[11px] rounded-full ${

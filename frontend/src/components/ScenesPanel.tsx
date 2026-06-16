@@ -58,7 +58,7 @@ export function ScenesPanel({ blackboard, scenesImages, scenesDrafts, pending, o
                         <img
                           src={imgUrl(p)}
                           alt={sc.name ?? slug}
-                          onClick={() => lightbox(imgUrl(p), sc.name ?? slug)}
+                          onClick={() => lightbox([{ src: imgUrl(p), alt: sc.name ?? slug }], 0)}
                           className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line"
                         />
                         <span className="absolute left-2 top-2 rounded-[5px] bg-accent/85 px-1.5 py-px font-mono text-[10px] text-white">
@@ -75,7 +75,7 @@ export function ScenesPanel({ blackboard, scenesImages, scenesDrafts, pending, o
                         <img
                           src={imgUrl(p)}
                           alt={`${sc.name ?? slug}(非正式)`}
-                          onClick={() => lightbox(imgUrl(p), `${sc.name ?? slug} · 手动草稿`)}
+                          onClick={() => lightbox([{ src: imgUrl(p), alt: `${sc.name ?? slug} · 手动草稿` }], 0)}
                           className="surface-in w-full cursor-zoom-in rounded-[10px] border border-dashed border-line-strong opacity-90"
                         />
                         <span className="absolute left-2 top-2 rounded-[5px] bg-ink/70 px-1.5 py-px font-mono text-[10px] text-paper">

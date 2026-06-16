@@ -7,6 +7,7 @@ import type {
   PickedRef,
   ProposalDraw,
   ProposalsResp,
+  SceneMap,
   Snapshot,
   StorySettings,
   StoryInfo,
@@ -50,6 +51,9 @@ export const getTurnDraws = (id: string, turnIndex: number) =>
   jget<TurnDraws>(`/story/${id}/turn/${turnIndex}/draws`);
 
 export const getStoryProposals = (id: string) => jget<ProposalsResp>(`/story/${id}/proposals`);
+
+// ── 场景地图(静态,第一版):只读组装(节点 / 实线 / 虚线)──
+export const getSceneMap = (id: string) => jget<SceneMap>(`/story/${id}/scene-map`);
 
 // ── 绘图节点拆分:写稿(DeepSeek)/ 画图(gpt-image-2)──
 export const getProposalDraw = (id: string, pid: number) =>

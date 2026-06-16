@@ -95,7 +95,7 @@ function TodoRow({ row, meta, onPick }: { row: ProposalRow; meta?: SceneMeta; on
         <img
           src={imgUrl(row.done_image_path)}
           alt=""
-          onClick={() => lightbox(imgUrl(row.done_image_path!), row.scene_slug)}
+          onClick={() => lightbox([{ src: imgUrl(row.done_image_path!), alt: row.scene_slug }], 0)}
           className="h-9 w-14 shrink-0 cursor-zoom-in rounded-md border border-line object-cover"
         />
       ) : (

@@ -161,6 +161,32 @@ export interface StorySettings {
   models: ModelChoice[]; // 可选模型清单
 }
 
+// ── 场景地图(静态,第一版):GET /story/{id}/scene-map ──
+export interface SceneMapNode {
+  slug: string;
+  name: string;
+  origin_turn: number | null;
+  image_paths: string[]; // 正典图(进黑板那批);变体翻页 gallery 用,可空
+}
+export interface SceneMapSolidEdge {
+  from: string; // 上一轮落点(首轮=start 哨兵)
+  to: string;
+  turn_index: number;
+  beat: string;
+  image_path?: string | null; // 该轮为落点场景出的正典图(用于点对话聚焦时翻到对应图)
+}
+export interface SceneMapDashedEdge {
+  a: string; // 无向相邻(a<b,已去重)
+  b: string;
+}
+export interface SceneMap {
+  start: string; // 虚拟「起点」节点的 slug 哨兵
+  current_scene: string | null;
+  nodes: SceneMapNode[];
+  solid_edges: SceneMapSolidEdge[]; // 实线=每轮转移(边数==轮数)
+  dashed_edges: SceneMapDashedEdge[]; // 虚线=空间相邻(装饰、无标签)
+}
+
 // ── 节点上下文(M4.5-B 读取接口 → M5-B HTTP 壳)──
 export interface ContextMessage {
   role: string;

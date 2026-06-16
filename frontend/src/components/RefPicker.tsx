@@ -43,7 +43,7 @@ export function RefPicker({ library, pastImages, value, onChange }: Props) {
                     <img
                       src={imgUrl(src)}
                       alt={r.semantic_name}
-                      onClick={() => lightbox(imgUrl(src), r.semantic_name)}
+                      onClick={() => lightbox([{ src: imgUrl(src), alt: r.semantic_name }], 0)}
                       className="h-[48px] w-[72px] cursor-zoom-in rounded-md border border-accent/40 object-cover"
                     />
                   ) : (
@@ -102,7 +102,7 @@ function Thumb({ src, label, sub, on, onClick }: { src: string; label: string; s
           role="button"
           onClick={(e) => {
             e.stopPropagation(); // 看大图,不切换选中
-            lightbox(imgUrl(src), label);
+            lightbox([{ src: imgUrl(src), alt: label }], 0);
           }}
           className="absolute bottom-0.5 left-0.5 flex h-4 w-4 items-center justify-center rounded bg-ink/55 text-[10px] text-white transition hover:bg-ink/80"
           title="看大图"

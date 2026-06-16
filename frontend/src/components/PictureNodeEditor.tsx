@@ -94,7 +94,7 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onGener
           <img
             src={imgUrl(currentImage)}
             alt={data.scene_slug}
-            onClick={() => lightbox(imgUrl(currentImage), data.scene_slug)}
+            onClick={() => lightbox([{ src: imgUrl(currentImage), alt: data.scene_slug }], 0)}
             className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line"
           />
         </div>

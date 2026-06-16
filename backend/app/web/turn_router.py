@@ -17,8 +17,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.agents.context import Message, build_messages
-from app.agents.director import DirectorOutputError, run_director
-from app.agents.director_review import DirectorReviewError, run_director_review
+from app.agents.director import run_director
+from app.agents.director_review import run_director_review
 from app.agents.writer import stream_writer
 from app.db.models import Blackboard, ImageGen, Story, Turn
 from app.db.session import async_session
@@ -81,7 +81,7 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
     )
     try:
         a = await run_director(history, blackboard, user_input, knowledge=knowledge, messages=a_messages, model=model_a)
-    except DirectorOutputError as exc:
+    except Exception as exc:  # 解析失败(DirectorOutputError)或 LLM 调用本身失败(API/网络)均上报
         yield sse({"type": "error", "reason": f"director-a: {exc}"})
         return
 
@@ -92,9 +92,13 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         "writer", history=history, blackboard=blackboard, user_action=user_input, writing_brief=a.writing_brief
     )
     chunks: list[str] = []
-    async for tok in stream_writer(history, blackboard, user_input, a.writing_brief, messages=w_messages, model=model_w):
-        chunks.append(tok)
-        yield sse({"type": "narrative_token", "text": tok})
+    try:
+        async for tok in stream_writer(history, blackboard, user_input, a.writing_brief, messages=w_messages, model=model_w):
+            chunks.append(tok)
+            yield sse({"type": "narrative_token", "text": tok})
+    except Exception as exc:  # 写手 LLM 调用失败 → 与 A/B 一致地报错(补「用户能看到出错」层,不改容错)
+        yield sse({"type": "error", "reason": f"writer: {exc}"})
+        return
     narrative = "".join(chunks)
     yield sse({"type": "narrative_done", "full_narrative": narrative})
 
@@ -107,7 +111,7 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         new_bb = await run_director_review(
             history, blackboard, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages, model=model_b
         )
-    except DirectorReviewError as exc:
+    except Exception as exc:  # 解析失败(DirectorReviewError)或 LLM 调用本身失败(API/网络)均上报
         yield sse({"type": "error", "reason": f"director-b: {exc}"})
         return
 

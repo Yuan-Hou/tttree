@@ -3,6 +3,7 @@ import * as api from "../api";
 import { imgUrl } from "../api";
 import type { ContextMessage } from "../types";
 import { useProposalDraw } from "../useProposalDraw";
+import { useToast } from "./Toast";
 import { Button } from "./ui";
 
 interface Props {
@@ -10,16 +11,19 @@ interface Props {
   proposalId: number;
   canAct: boolean;
   onChanged: () => void; // 写稿变化 → 让画图节点/绘图台重取
+  onWriting?: (proposalId: number, on: boolean) => void; // 写稿/重写中 → 点亮显微镜写稿节点
 }
 
 const ROLE: Record<string, string> = { system: "system · 系统", user: "user · 输入", assistant: "assistant · 历史叙事" };
 
 /** 写稿节点(绘图 Agent / DeepSeek):输入按区块展示+可编辑;输出是「提示词文本」,绝不是图;
  *  重试 = 重写提示词(可用编辑后的输入)。 */
-export function WriteNodeEditor({ storyId, proposalId, canAct, onChanged }: Props) {
+export function WriteNodeEditor({ storyId, proposalId, canAct, onChanged, onWriting }: Props) {
   const { data, loading, reload } = useProposalDraw(storyId, proposalId);
+  const toast = useToast();
   const [msgs, setMsgs] = useState<ContextMessage[]>([]);
   const [busy, setBusy] = useState<null | "save" | "write">(null);
+  const [error, setError] = useState<string | null>(null);
 
   const orig = data ? JSON.stringify(data.draft_messages) : "[]";
   useEffect(() => {
@@ -31,27 +35,28 @@ export function WriteNodeEditor({ storyId, proposalId, canAct, onChanged }: Prop
   if (loading && !data) return <Shell title="写稿"><Dim>读取中…</Dim></Shell>;
   if (!data) return <Shell title="写稿"><Dim>—</Dim></Shell>;
 
-  const firstWrite = async () => {
+  const runWrite = async (fn: () => Promise<unknown>) => {
     setBusy("write");
+    setError(null);
+    onWriting?.(proposalId, true);
     try {
-      await api.writeDraft(storyId, proposalId);
+      await fn();
       await reload();
       onChanged();
+    } catch (e) {
+      setError(String(e));
+      toast(`绘图写稿出错:${String(e)}`);
     } finally {
+      onWriting?.(proposalId, false);
       setBusy(null);
     }
   };
-  const rewrite = async () => {
-    setBusy("write");
-    try {
+  const firstWrite = () => runWrite(() => api.writeDraft(storyId, proposalId));
+  const rewrite = () =>
+    runWrite(async () => {
       if (dirty) await api.saveDraftMessages(storyId, proposalId, msgs);
       await api.writeDraft(storyId, proposalId, dirty ? msgs : undefined);
-      await reload();
-      onChanged();
-    } finally {
-      setBusy(null);
-    }
-  };
+    });
   const save = async () => {
     setBusy("save");
     try {
@@ -68,6 +73,12 @@ export function WriteNodeEditor({ storyId, proposalId, canAct, onChanged }: Prop
       scene={data.scene_slug}
       kind={data.kind}
     >
+      {error && (
+        <div className="rounded-lg border border-danger/30 bg-danger-soft px-3 py-2.5 text-[12px] leading-relaxed text-danger">
+          <div className="mb-0.5 font-medium">⚠ 写稿调用失败</div>
+          <div className="whitespace-pre-wrap break-words font-mono text-[11px]">{error}</div>
+        </div>
+      )}
       {!written && data.draft_messages.length === 0 ? (
         <div className="flex flex-col gap-2">
           <p className="text-[12.5px] leading-relaxed text-ink-faint">还没写稿。让绘图 Agent 据该轮黑板+画风+参考图库写第一版提示词。</p>

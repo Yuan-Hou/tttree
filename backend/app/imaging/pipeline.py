@@ -3,6 +3,7 @@ M3 的 CLI 与 M4 的前端接口都复用此函数。"""
 
 import json
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Blackboard, ImageGen
@@ -34,6 +35,24 @@ async def record_generation(
     source_turn: int | None = None,
     append_to_blackboard: bool = True,
 ) -> ImageGen:
+    # 取代(以「同场景同轮次」为单位):新出一张正典图前,把该 (scene, source_turn) 下旧的正典图
+    # 自动标记 superseded —— 组内只留最新一张有效。被取代的图退出 Agent 候选池,但仍在 image_paths、
+    # 仍可 RefPicker 手动选。只在「新追加进黑板的正典图」时触发(reuse 不新增、手动草稿不进池,均不触发)。
+    # 不分 new_scene/variant:同一轮内某场景的 kind 恒定(诞生轮才 new_scene,之后皆 variant),
+    # 故按 kind 再分组是冗余;「该场景这一轮的有效图」天然以 (scene, turn) 为单位。
+    if append_to_blackboard and is_canon_origin(origin) and source_turn is not None:
+        await session.execute(
+            update(ImageGen)
+            .where(
+                ImageGen.story_id == story_id,
+                ImageGen.scene_slug == scene_slug,
+                ImageGen.source_turn == source_turn,
+                ImageGen.origin == CANON_ORIGIN,
+                ImageGen.superseded.is_(False),
+            )
+            .values(superseded=True)
+        )
+
     # 黑板 image_paths:存「该场景当前有哪些图」简表(append 新图)。
     # reuse 复用已在库中的图,不重复追加(append_to_blackboard=False)。
     row = await session.get(Blackboard, story_id)

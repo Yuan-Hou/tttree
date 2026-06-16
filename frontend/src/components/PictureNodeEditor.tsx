@@ -4,6 +4,7 @@ import { imgUrl } from "../api";
 import type { DraftRef, PickedRef } from "../types";
 import { useProposalDraw } from "../useProposalDraw";
 import { useLightbox } from "./Lightbox";
+import { useToast } from "./Toast";
 import { RefPicker } from "./RefPicker";
 import { Button } from "./ui";
 
@@ -12,7 +13,8 @@ interface Props {
   proposalId: number;
   canAct: boolean;
   onDone: () => void; // 出图成功 → 刷新绘图台/显微镜/快照
-  onGenerating?: (scene: string, on: boolean) => void; // 点亮显微镜绘图节点
+  onWriting?: (proposalId: number, on: boolean) => void; // 写稿中 → 点亮显微镜写稿节点
+  onGenerating?: (proposalId: number, on: boolean) => void; // 点亮显微镜绘图节点(按 proposal_id 索引)
 }
 
 const toPicked = (m: DraftRef[]): PickedRef[] =>
@@ -24,9 +26,10 @@ const toPicked = (m: DraftRef[]): PickedRef[] =>
 
 /** 画图节点(gpt-image-2):输入 = 写稿的提示词(可编辑)+ 自由选择的参考图(两类来源);
  *  输出 = 生成的图;重试 = 只用当前提示词+参考图重新出图,不回去重写提示词。 */
-export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onGenerating }: Props) {
+export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onWriting, onGenerating }: Props) {
   const { data, loading, reload } = useProposalDraw(storyId, proposalId);
   const lightbox = useLightbox();
+  const toast = useToast();
   const [prompt, setPrompt] = useState("");
   const [refs, setRefs] = useState<PickedRef[]>([]);
   const [busy, setBusy] = useState<null | "writing" | "generating">(null);
@@ -51,12 +54,15 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onGener
   const ensureDraft = async () => {
     setBusy("writing");
     setError(null);
+    onWriting?.(proposalId, true);
     try {
       await api.writeDraft(storyId, proposalId);
       await reload();
     } catch (e) {
       setError(String(e));
+      toast(`绘图写稿出错:${String(e)}`);
     } finally {
+      onWriting?.(proposalId, false);
       setBusy(null);
     }
   };
@@ -64,19 +70,23 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onGener
   const picture = async () => {
     setBusy("generating");
     setError(null);
-    onGenerating?.(data.scene_slug, true);
+    onGenerating?.(proposalId, true);
     try {
       await api.pictureDraw(storyId, proposalId, { prompt, references: refs }, (ev) => {
         if (ev.type === "image_ready") {
           setFreshImage(ev.image_path);
           onDone();
           reload();
-        } else if (ev.type === "image_failed") setError(ev.reason);
+        } else if (ev.type === "image_failed") {
+          setError(ev.reason);
+          toast(`绘图(gpt-image-2)出错:${ev.reason}`);
+        }
       });
     } catch (e) {
       setError(String(e));
+      toast(`绘图(gpt-image-2)出错:${String(e)}`);
     } finally {
-      onGenerating?.(data.scene_slug, false);
+      onGenerating?.(proposalId, false);
       setBusy(null);
     }
   };

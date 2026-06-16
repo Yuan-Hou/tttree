@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -110,6 +110,9 @@ class ImageGen(Base):
     output_path: Mapped[str] = mapped_column(String, default="")  # 相对 backend 根
     origin: Mapped[str] = mapped_column(String, default="")  # director_b_proposal/user_initiated
     source_turn: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 取代:同场景同轮次内被后续重绘取代的旧正典图 → True。退出绘图 Agent 候选池(对 Agent 隐身),
+    # 但仍留在黑板 image_paths(gallery 可翻页)、仍可在 RefPicker 手动选(与 user_initiated 同等待遇)。
+    superseded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 

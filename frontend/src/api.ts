@@ -190,9 +190,13 @@ export const decideDraw = (
   body: { draft_id: string; decision: "reuse" | "skip"; prompt?: string; reuse_image_path?: string },
 ) => fetch(`/story/${id}/draw/confirm`, { method: "POST", headers: json, body: JSON.stringify(body) }).then((r) => r.json());
 
-/** 通用 SSE:fetch + ReadableStream,逐帧(\n\n 分隔)解析 `data: {json}`。 */
-async function streamSSE<E>(url: string, body: unknown, onEvent: (e: E) => void): Promise<void> {
-  const resp = await fetch(url, { method: "POST", headers: json, body: JSON.stringify(body) });
+/** SSE 被 AbortController 取消时抛出此错。调用方据此区分「主动取消(切故事/卸载)」与真实错误。 */
+export const isAbortError = (e: unknown): boolean =>
+  e instanceof DOMException ? e.name === "AbortError" : (e as { name?: string })?.name === "AbortError";
+
+/** 通用 SSE:fetch + ReadableStream,逐帧(\n\n 分隔)解析 `data: {json}`。signal 可中途取消。 */
+async function streamSSE<E>(url: string, body: unknown, onEvent: (e: E) => void, signal?: AbortSignal): Promise<void> {
+  const resp = await fetch(url, { method: "POST", headers: json, body: JSON.stringify(body), signal });
   if (!resp.body) throw new Error("无响应流");
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
@@ -211,8 +215,8 @@ async function streamSSE<E>(url: string, body: unknown, onEvent: (e: E) => void)
   }
 }
 
-export const streamTurn = (id: string, userInput: string, onEvent: (e: TurnEvent) => void) =>
-  streamSSE<TurnEvent>(`/story/${id}/turn`, { user_input: userInput }, onEvent);
+export const streamTurn = (id: string, userInput: string, onEvent: (e: TurnEvent) => void, signal?: AbortSignal) =>
+  streamSSE<TurnEvent>(`/story/${id}/turn`, { user_input: userInput }, onEvent, signal);
 
 /** confirm 出图(花钱)→ 短命 SSE 流。confirm 是唯一通往真实出图的路径。
  *  references = 用户编辑后的参考图清单(省略则用 Agent 原始清单)。 */
@@ -220,4 +224,5 @@ export const confirmDraw = (
   id: string,
   body: { draft_id: string; prompt: string; references?: PickedRef[] },
   onEvent: (e: DrawEvent) => void,
-) => streamSSE<DrawEvent>(`/story/${id}/draw/confirm`, { ...body, decision: "confirm" }, onEvent);
+  signal?: AbortSignal,
+) => streamSSE<DrawEvent>(`/story/${id}/draw/confirm`, { ...body, decision: "confirm" }, onEvent, signal);

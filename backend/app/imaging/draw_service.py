@@ -35,6 +35,7 @@ async def build_history_catalog(
                 ImageGen.scene_slug == scene_slug,
                 ImageGen.kind != "reuse",
                 ImageGen.origin != DRAFT_ORIGIN,  # 手动草稿不进 Agent 候选池
+                ImageGen.superseded.is_(False),  # 被取代的旧正典图自动退出候选池
             )
             .order_by(ImageGen.id)
         )

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
 import type {
   AgentStep,
@@ -30,6 +30,13 @@ interface Props {
   retrying: AgentStep | null;
   contextsVersion: number;
   drawsVersion: number;
+  liveError: { step: AgentStep; reason: string } | null; // 最近一次 agent 调用失败 → 对应节点展示详情
+  dismissFailure: () => void; // 弃掉「失败的提交」(纯前端,不碰后端)
+  // 写稿/出图「运行中」记账(引擎层 → 关掉重开工作台/切节点不丢「运行中」)
+  writingIds: number[];
+  generatingIds: number[];
+  onWriting: (proposalId: number, on: boolean) => void;
+  onGenerating: (proposalId: number, on: boolean) => void;
   proposals: DrawProposal[];
   onRetry: (s: AgentStep) => void;
   onRollback: () => void;
@@ -73,21 +80,31 @@ export function Workbench(p: Props) {
   const [contexts, setContexts] = useState<TurnContexts | null>(null);
   const [loading, setLoading] = useState(false);
   const [draws, setDraws] = useState<TurnDraws | null>(null);
-  const [generating, setGenerating] = useState<string[]>([]);
 
   const effTurn = p.scopeTurn ?? p.latestTurn;
   const isLive = p.liveStages !== null && p.liveTurn === effTurn;
+  // 「失败的提交」视图:有失败详情、非进行中/重走中,且当前停在比最新已落盘轮更靠后的那一格
+  // (= 失败尝试 latestTurn+1)。这一格不是真实落盘轮,故没有上下文/绘图,也不能回退/重试。
+  const failedView =
+    p.liveError != null && !isLive && p.retrying === null && effTurn != null && effTurn > (p.latestTurn ?? 0);
   const isLatest = effTurn != null && effTurn === p.latestTurn;
   const idle = !p.turnStreaming && p.retrying === null;
-  const editable = isLatest && idle && !isLive;
+  const editable = isLatest && idle && !isLive && !failedView;
+  const noPersisted = isLive || failedView; // 无落盘上下文 / 绘图支流
 
-  // 节点状态:进行中→实时点亮;重走中→切入点起亮;否则静态全完成。
+  // 节点状态:进行中→实时点亮;重走中→切入点起亮;失败→失败步 error、其后 pending;否则静态全完成。
   let stages: LiveStages = ALL_DONE;
   if (isLive && p.liveStages) stages = p.liveStages;
   else if (p.retrying && isLatest) {
     const from = ORDER.indexOf(p.retrying);
     stages = ORDER.reduce((acc, s, i) => {
       acc[s] = (i >= from ? "running" : "done") as StepStatus;
+      return acc;
+    }, {} as LiveStages);
+  } else if (failedView && p.liveError) {
+    const fi = ORDER.indexOf(p.liveError.step);
+    stages = ORDER.reduce((acc, s, i) => {
+      acc[s] = (i < fi ? "done" : i === fi ? "error" : "pending") as StepStatus;
       return acc;
     }, {} as LiveStages);
   }
@@ -110,9 +127,9 @@ export function Workbench(p: Props) {
     return () => window.removeEventListener("keydown", h);
   }, [p]);
 
-  // 取该轮上下文(进行中的轮尚未落盘 → 不取)
+  // 取该轮上下文(进行中 / 失败的提交 都没落盘 → 不取)
   useEffect(() => {
-    if (effTurn == null || isLive) {
+    if (effTurn == null || noPersisted) {
       setContexts(null);
       return;
     }
@@ -126,24 +143,31 @@ export function Workbench(p: Props) {
     return () => {
       alive = false;
     };
-  }, [p.storyId, effTurn, isLive, p.contextsVersion]);
+  }, [p.storyId, effTurn, noPersisted, p.contextsVersion]);
 
-  // 取该轮绘图支流
+  // 取该轮绘图支流。换轮(或换故事)先清空旧数据,避免短暂显示上一轮的绘图节点(跨轮串);
+  // 同轮内的 drawsVersion 刷新不清空,避免无谓闪烁。
+  const prevDrawsKey = useRef<string | null>(null);
   useEffect(() => {
-    if (effTurn == null || isLive) {
+    if (effTurn == null || noPersisted) {
       setDraws(null);
       return;
+    }
+    const key = `${p.storyId}:${effTurn}`;
+    if (prevDrawsKey.current !== key) {
+      setDraws(null);
+      prevDrawsKey.current = key;
     }
     let alive = true;
     api.getTurnDraws(p.storyId, effTurn).then((d) => alive && setDraws(d)).catch(() => alive && setDraws(null));
     return () => {
       alive = false;
     };
-  }, [p.storyId, effTurn, isLive, p.drawsVersion]);
+  }, [p.storyId, effTurn, noPersisted, p.drawsVersion]);
 
   const sel = parseSel(selId);
-  const onGeneratingChange = (scene: string, on: boolean) =>
-    setGenerating((g) => (on ? [...new Set([...g, scene])] : g.filter((s) => s !== scene)));
+  // 在对应节点展示失败详情:失败的提交(failedView)整体,或在最新正常轮上「从这里重试」失败时
+  const showNodeError = p.liveError != null && !isLive && p.retrying === null && (failedView || isLatest);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-ink/20 p-5 backdrop-blur-[2px]" onClick={p.onClose}>
@@ -163,15 +187,27 @@ export function Workbench(p: Props) {
             <div className="ml-2 flex items-center gap-1.5">
               <RoundBtn disabled={effTurn <= 1} onClick={() => p.setScopeTurn(effTurn - 1)}>‹</RoundBtn>
               <span className="font-mono text-[12px] text-ink">
-                第 {effTurn} 轮<span className="text-ink-faint"> / 共 {p.latestTurn}</span>
+                {failedView ? (
+                  "失败的提交"
+                ) : (
+                  <>
+                    第 {effTurn} 轮<span className="text-ink-faint"> / 共 {p.latestTurn}</span>
+                  </>
+                )}
               </span>
-              <RoundBtn disabled={p.latestTurn == null || effTurn >= p.latestTurn} onClick={() => p.setScopeTurn(effTurn + 1)}>›</RoundBtn>
+              <RoundBtn disabled={failedView || p.latestTurn == null || effTurn >= p.latestTurn} onClick={() => p.setScopeTurn(effTurn + 1)}>›</RoundBtn>
               <span
                 className={`ml-1.5 rounded-[5px] px-1.5 py-px font-mono text-[10px] ${
-                  isLive ? "bg-accent-soft text-accent-ink" : isLatest ? "bg-sunken text-ink-soft" : "bg-sunken text-ink-faint"
+                  failedView
+                    ? "bg-danger-soft text-danger"
+                    : isLive
+                      ? "bg-accent-soft text-accent-ink"
+                      : isLatest
+                        ? "bg-sunken text-ink-soft"
+                        : "bg-sunken text-ink-faint"
                 }`}
               >
-                {isLive ? "进行中" : isLatest ? "最新轮 · 可操作" : "历史轮 · 只读"}
+                {failedView ? "未计入故事 · 重新输入以重试" : isLive ? "进行中" : isLatest ? "最新轮 · 可操作" : "历史轮 · 只读"}
               </span>
             </div>
           ) : (
@@ -179,8 +215,18 @@ export function Workbench(p: Props) {
           )}
 
           <div className="ml-auto flex items-center gap-2">
+            {failedView && (
+              <Button variant="ghost" onClick={p.dismissFailure} title="失败的提交未落盘,弃掉它(不影响已有正常轮)">
+                弃掉这次失败
+              </Button>
+            )}
             <Button variant="ghost" onClick={p.onFork} title="完整克隆当前故事,作主动后悔药">建副本</Button>
-            <Button variant="ghost" disabled={p.latestTurn == null || !idle} onClick={p.onRollback} title="回退最新一轮(可连续)">
+            <Button
+              variant="ghost"
+              disabled={failedView || p.latestTurn == null || !idle}
+              onClick={p.onRollback}
+              title={failedView ? "失败的提交没进库,无需回退;回退是删最新的正常轮" : "回退最新一轮(可连续)"}
+            >
               ↩ 回退最新轮
             </Button>
             <Button variant="quiet" onClick={p.onClose}>关闭 ✕</Button>
@@ -197,7 +243,8 @@ export function Workbench(p: Props) {
               <AgentFlow
                 stages={stages}
                 draws={drawItems}
-                generatingScenes={generating}
+                writingIds={p.writingIds}
+                generatingIds={p.generatingIds}
                 selectedId={selId}
                 onSelectNode={setSelId}
               />
@@ -222,6 +269,7 @@ export function Workbench(p: Props) {
                   liveNarrative={liveNarrative}
                   editable={editable}
                   retrying={p.retrying !== null}
+                  error={showNodeError && p.liveError?.step === sel.step ? p.liveError.reason : undefined}
                   onSave={(step, msgs) => p.saveStepContext(effTurn, step, msgs)}
                   onRetry={p.onRetry}
                 />
@@ -236,13 +284,15 @@ export function Workbench(p: Props) {
                     proposalId={drawItems[sel.i].proposal_id!}
                     canAct={idle}
                     onChanged={p.reloadScope}
+                    onWriting={p.onWriting}
                   />
                 ) : (
                   <PictureNodeEditor
                     storyId={p.storyId}
                     proposalId={drawItems[sel.i].proposal_id!}
                     canAct={idle}
-                    onGenerating={onGeneratingChange}
+                    onWriting={p.onWriting}
+                    onGenerating={p.onGenerating}
                     onDone={p.reloadScope}
                   />
                 )

@@ -208,7 +208,7 @@ export interface TurnContexts {
 }
 
 export type AgentStep = "director_a" | "writer" | "director_b" | "reducer";
-export type StepStatus = "pending" | "running" | "done";
+export type StepStatus = "pending" | "running" | "done" | "error";
 
 // ── 绘图支流(每个绘图提案 = 写稿 + 绘图 双节点)。与绘图台同源:DrawProposal 表 ──
 export interface TurnDrawProposal {

@@ -86,7 +86,7 @@ export function App() {
 
         {e.curId ? (
           <>
-            <ReadingColumn turns={e.turns} onTurnClick={focusTurnOnMap} />
+            <ReadingColumn turns={e.turns} onTurnClick={focusTurnOnMap} onDismissFailure={e.dismissFailure} />
             <Composer disabled={!e.curId} streaming={e.turnStreaming} onSubmit={e.submitTurn} />
           </>
         ) : (
@@ -154,6 +154,12 @@ export function App() {
           retrying={e.retrying}
           contextsVersion={e.contextsVersion}
           drawsVersion={e.drawsVersion}
+          liveError={e.liveError}
+          dismissFailure={e.dismissFailure}
+          writingIds={e.writingIds}
+          generatingIds={e.generatingIds}
+          onWriting={e.onWriting}
+          onGenerating={e.onGenerating}
           proposals={e.proposals}
           onRetry={e.doRetry}
           onRollback={e.doRollback}

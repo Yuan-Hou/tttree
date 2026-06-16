@@ -10,6 +10,7 @@ interface Props {
   liveNarrative: string;
   editable: boolean; // 最新轮 && 非进行中 && 非重走中
   retrying: boolean;
+  error?: string; // 该步最近一次调用失败的详情(LLM 报错)→ 节点里展示
   onSave: (step: Exclude<AgentStep, "reducer">, messages: ContextMessage[]) => Promise<void>;
   onRetry: (step: Exclude<AgentStep, "reducer">) => void;
 }
@@ -51,7 +52,7 @@ export function NodeEditor(p: Props) {
 
   if (p.live)
     return (
-      <Shell title={TITLE[step]} note="本轮进行中,完整输入记录落盘后才可查看/编辑。">
+      <Shell title={TITLE[step]} note="本轮进行中,完整输入记录落盘后才可查看/编辑。" error={p.error}>
         {step === "writer" && p.liveNarrative ? (
           <>
             <Label>实时成稿</Label>
@@ -66,8 +67,8 @@ export function NodeEditor(p: Props) {
       </Shell>
     );
 
-  if (p.loading) return <Shell title={TITLE[step]}><Dim /></Shell>;
-  if (!sc) return <Shell title={TITLE[step]}><Dim /></Shell>;
+  if (p.loading) return <Shell title={TITLE[step]} error={p.error}><Dim /></Shell>;
+  if (!sc) return <Shell title={TITLE[step]} error={p.error}><Dim /></Shell>;
 
   const update = (i: number, content: string) =>
     setDraft((d) => d.map((m, j) => (j === i ? { ...m, content } : m)));
@@ -89,6 +90,7 @@ export function NodeEditor(p: Props) {
   return (
     <Shell
       title={TITLE[step]}
+      error={p.error}
       note={
         p.editable
           ? `输入 ${draft.length} 段 · 可就地编辑(直接改这一步存的记录)`
@@ -136,14 +138,22 @@ export function NodeEditor(p: Props) {
   );
 }
 
-function Shell({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
+function Shell({ title, note, error, children }: { title: string; note?: string; error?: string; children: React.ReactNode }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-line px-5 py-3.5">
         <div className="font-serif text-[15px] text-ink">{title}</div>
         {note && <div className="mt-0.5 text-[11.5px] text-ink-faint">{note}</div>}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">{children}</div>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
+        {error && (
+          <div className="rounded-lg border border-danger/30 bg-danger-soft px-3 py-2.5 text-[12px] leading-relaxed text-danger">
+            <div className="mb-0.5 font-medium">⚠ 本步调用失败</div>
+            <div className="whitespace-pre-wrap break-words font-mono text-[11px]">{error}</div>
+          </div>
+        )}
+        {children}
+      </div>
     </div>
   );
 }

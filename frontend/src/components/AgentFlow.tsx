@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Background, BackgroundVariant, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { AgentStep, DrawItem, StepStatus } from "../types";
+import { drawNodeStatuses } from "../drawNodeState";
 import { AgentNode, type AgentNodeData } from "./AgentNode";
 
 const nodeTypes = { agent: AgentNode };
@@ -9,7 +10,8 @@ const nodeTypes = { agent: AgentNode };
 interface Props {
   stages: Record<AgentStep, StepStatus>;
   draws: DrawItem[];
-  generatingScenes: string[]; // 工作台里正在出图的场景 → 绘图节点亮"运行中"
+  writingIds: number[]; // 正在写稿/重写的 proposal_id → 写稿节点亮"运行中"
+  generatingIds: number[]; // 正在出图的 proposal_id → 绘图节点亮"运行中"(按 proposal_id 索引,跨轮不串)
   selectedId: string | null;
   onSelectNode: (id: string) => void;
 }
@@ -21,7 +23,7 @@ const MAIN: { step: AgentStep; glyph: string; title: string; subtitle: string; x
   { step: "reducer", glyph: "⤓", title: "落盘", subtitle: "纯逻辑落盘,盖诞生点写入 Turn", x: 766 },
 ];
 
-export function AgentFlow({ stages, draws, generatingScenes, selectedId, onSelectNode }: Props) {
+export function AgentFlow({ stages, draws, writingIds, generatingIds, selectedId, onSelectNode }: Props) {
   const nodes: Node[] = useMemo(() => {
     const ns: Node[] = MAIN.map((d) => ({
       id: d.step,
@@ -41,9 +43,7 @@ export function AgentFlow({ stages, draws, generatingScenes, selectedId, onSelec
 
     draws.forEach((it, i) => {
       const y = 18 + i * 132;
-      const generating = generatingScenes.includes(it.scene_slug);
-      const draftStatus: StepStatus = it.status === "done" ? "done" : "pending";
-      const imgStatus: StepStatus = generating ? "running" : it.status === "done" ? "done" : "pending";
+      const { draft: draftStatus, img: imgStatus } = drawNodeStatuses(it, writingIds, generatingIds);
       ns.push({
         id: `draw:${i}:prompt`,
         type: "agent",
@@ -78,7 +78,7 @@ export function AgentFlow({ stages, draws, generatingScenes, selectedId, onSelec
       });
     });
     return ns;
-  }, [stages, draws, generatingScenes, selectedId, onSelectNode]);
+  }, [stages, draws, writingIds, generatingIds, selectedId, onSelectNode]);
 
   const edges: Edge[] = useMemo(() => {
     const e: Edge[] = [];
@@ -89,18 +89,24 @@ export function AgentFlow({ stages, draws, generatingScenes, selectedId, onSelec
       e.push({ id: `${s}-${target}`, source: s, target, animated: active, style: edgeStyle(active) });
     });
     draws.forEach((it, i) => {
-      const generating = generatingScenes.includes(it.scene_slug);
-      e.push({ id: `reducer-d${i}`, source: "reducer", target: `draw:${i}:prompt`, style: edgeStyle(false) });
+      const st = drawNodeStatuses(it, writingIds, generatingIds);
+      e.push({
+        id: `reducer-d${i}`,
+        source: "reducer",
+        target: `draw:${i}:prompt`,
+        animated: st.draft === "running",
+        style: edgeStyle(st.draft === "running"),
+      });
       e.push({
         id: `d${i}-img`,
         source: `draw:${i}:prompt`,
         target: `draw:${i}:image`,
-        animated: generating,
-        style: edgeStyle(generating),
+        animated: st.img === "running",
+        style: edgeStyle(st.img === "running"),
       });
     });
     return e;
-  }, [stages, draws, generatingScenes]);
+  }, [stages, draws, writingIds, generatingIds]);
 
   return (
     <ReactFlow

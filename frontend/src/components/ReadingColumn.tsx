@@ -7,9 +7,11 @@ import { Tag } from "./ui";
 export function ReadingColumn({
   turns,
   onTurnClick,
+  onDismissFailure,
 }: {
   turns: TurnView[];
   onTurnClick?: (turnIndex: number) => void;
+  onDismissFailure?: () => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -59,7 +61,13 @@ export function ReadingColumn({
             <div className="absolute bottom-2 left-[5px] top-2 w-px bg-line" aria-hidden />
             <div className="flex flex-col">
               {turns.map((t, i) => (
-                <TurnBlock key={t.key} turn={t} latest={i === turns.length - 1} onClick={onTurnClick} />
+                <TurnBlock
+                  key={t.key}
+                  turn={t}
+                  latest={i === turns.length - 1}
+                  onClick={onTurnClick}
+                  onDismissFailure={onDismissFailure}
+                />
               ))}
             </div>
           </div>
@@ -74,10 +82,12 @@ function TurnBlock({
   turn,
   latest,
   onClick,
+  onDismissFailure,
 }: {
   turn: TurnView;
   latest: boolean;
   onClick?: (turnIndex: number) => void;
+  onDismissFailure?: () => void;
 }) {
   // 单击该轮 → 让地图聚焦对应场景节点。选中文字时不触发(避免劫持划词)。
   const handleClick = () => {
@@ -112,9 +122,24 @@ function TurnBlock({
         {turn.narrative}
       </div>
       {turn.error && (
-        <p className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-[13px] text-danger">
-          叙事中断:{turn.error}
-        </p>
+        <div className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2.5 text-[13px] text-danger">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">⚠ 本次提交失败 · 未计入故事</span>
+            {onDismissFailure && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismissFailure();
+                }}
+                className="ml-auto rounded-md border border-danger/30 px-2 py-0.5 text-[11px] transition hover:bg-danger/10"
+              >
+                弃掉
+              </button>
+            )}
+          </div>
+          <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{turn.error}</div>
+          <div className="mt-1 text-[11px] text-danger/80">重试请重新输入并发送(下方输入框照常可用)。</div>
+        </div>
       )}
     </article>
   );

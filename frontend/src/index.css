@@ -101,6 +101,21 @@ body {
   }
 }
 
+/* toast 入场:从右下滑入 */
+.toast-in {
+  animation: toast-in 0.28s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* 占位呼吸 */
 .breathe {
   animation: breathe 1.8s ease-in-out infinite;
@@ -118,6 +133,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .caret::after,
   .surface-in,
+  .toast-in,
   .breathe {
     animation: none !important;
   }

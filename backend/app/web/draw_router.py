@@ -95,6 +95,23 @@ async def _blackboard_after_turn(s: AsyncSession, story_id: str, n: int) -> dict
     return json.loads(t.blackboard_after) if t and t.blackboard_after else None
 
 
+async def _tips_for_turn(s: AsyncSession, story_id: str, n: int | None) -> list[str]:
+    """取第 N 轮导演 A 的设定提示(tips)。绘图归属到第 N 轮 → 用那一轮 A 摘的设定递给绘图写稿。
+    无归属轮 / 取不到 / 老数据无该字段 → 空列表(优雅降级,不影响出图)。"""
+    if n is None:
+        return []
+    t = (
+        await s.execute(select(Turn).where(Turn.story_id == story_id, Turn.turn_index == n))
+    ).scalar_one_or_none()
+    if t is None or not t.director_a_json:
+        return []
+    try:
+        tips = json.loads(t.director_a_json).get("tips")
+    except (json.JSONDecodeError, AttributeError):
+        return []
+    return [str(x) for x in tips] if isinstance(tips, list) else []
+
+
 async def _scene_image_kinds(s: AsyncSession, story_id: str, scene_slug: str) -> set[str]:
     rows = (
         await s.execute(
@@ -188,9 +205,10 @@ async def post_draw(story_id: str, req: DrawReq) -> dict:
         # ── 写稿(上下文截断到第 N 轮)──
         history = await _history_through_turn(s, story_id, n)
         request = req.request or f"为场景 {scene_slug} 画一张图,定格第 {n} 轮的画面。"
+        tips = await _tips_for_turn(s, story_id, n)  # 第 N 轮 A 的设定提示 → 递给绘图写稿
         bundle = await prepare_draft(
             s, story_id=story_id, blackboard=bb_n, scene_slug=scene_slug,
-            draw_request=request, history=history, kind=kind,
+            draw_request=request, history=history, kind=kind, tips=tips,
         )
         assets = await list_references(s, story_id)
         # 用户手动选参考图的「过往绘制结果」列表:整故事所有 ImageGen(含手动草稿),不按轮截断、不过滤。
@@ -392,9 +410,10 @@ async def post_write(story_id: str, proposal_id: int, req: WriteReq) -> dict:
         scene_slug, kind = prop.scene_slug, prop.kind
         history = await _history_through_turn(s, story_id, n)
         request = req.request or f"为场景 {scene_slug} 画一张图,定格第 {n} 轮的画面。"
+        tips = await _tips_for_turn(s, story_id, n)  # 第 N 轮 A 的设定提示(仅新建时注入;复用 messages 已含)
         used, draft = await write_illustration_draft(
             s, story_id=story_id, blackboard=bb_n, scene_slug=scene_slug,
-            draw_request=request, history=history, kind=kind, messages=req.messages,
+            draw_request=request, history=history, kind=kind, messages=req.messages, tips=tips,
         )
         manifest_dicts = [r.model_dump() for r in draft.reference_manifest]
         prop.draft_messages = json.dumps(used, ensure_ascii=False)

@@ -92,12 +92,14 @@ async def prepare_draft(
     draw_request: str,
     history: list | None = None,
     kind: str | None = None,
+    tips: list[str] | None = None,
 ) -> DraftBundle:
     """阶段①:绘图 Agent 据黑板 + 画风圣经 + 参考图库清单写稿。
 
     history / blackboard 由调用方按「该绘图提案所属轮 N」截断后传入(≤N 的对话 + 第 N 轮
     blackboard_after),避免把后续剧情画进早期场景图。kind 为后端权威判定值(按 origin_turn),
     传入后:① 作为提示告知 Agent ② 覆盖 Agent 自报的 kind,确保存档 kind 与规则一致。
+    tips:第 N 轮导演 A 的设定提示(由调用方按归属轮取出),递入易变区尾部。
     """
     assets = await list_references(session, story_id)
     scene = blackboard["scenes"][scene_slug]
@@ -111,6 +113,7 @@ async def prepare_draft(
         draw_request=draw_request + _kind_hint(kind),
         reference_catalog=catalog,
         model=model,
+        tips=tips,
     )
     if kind in ("new_scene", "variant"):
         draft.kind = kind  # 后端权威覆盖
@@ -129,11 +132,14 @@ async def write_illustration_draft(
     history: list,
     kind: str | None,
     messages: list | None = None,
+    tips: list[str] | None = None,
 ) -> tuple[list, IllustratorDraft]:
     """写稿步(绘图 Agent / DeepSeek)。返回 (喂进去的完整 messages, 写出的稿)。
 
     messages 给定(用户编辑过的写稿输入)则原样重跑;否则按截断上下文构造。kind 为后端权威值,
     覆盖 Agent 自报。供「写稿节点」持久化输入+输出、并支持「重写提示词」。
+    tips:第 N 轮导演 A 的设定提示(由调用方按归属轮取出),递入易变区尾部;复用既有 messages 时
+    其中已含 tips,不再重复注入。
     """
     assets = await list_references(session, story_id)
     scene = blackboard["scenes"][scene_slug]
@@ -141,7 +147,7 @@ async def write_illustration_draft(
     catalog = render_reference_catalog(assets, history_images=hist_imgs)
     full_request = draw_request + _kind_hint(kind)
     used = messages or build_illustrator_messages(
-        history=history, blackboard=blackboard, draw_request=full_request, reference_catalog=catalog
+        history=history, blackboard=blackboard, draw_request=full_request, reference_catalog=catalog, tips=tips
     )
     st = await get_or_create_settings(session, story_id)
     model = resolve_agent_model(st, "illustrator")  # 绘图写稿 Agent 的故事内模型设置

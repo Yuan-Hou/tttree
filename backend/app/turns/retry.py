@@ -115,12 +115,14 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
         if entry == "writer":
             # A 保留 → Writer 上下文与原先逐字节相同 → 复用存档 messages(缓存命中)
             w_messages = json.loads(turn_n.writer_messages or "[]") or build_messages(
-                "writer", history=history, blackboard=pre_bb, user_action=user_input, writing_brief=a.writing_brief
+                "writer", history=history, blackboard=pre_bb, user_action=user_input,
+                writing_brief=a.writing_brief, tips=a.tips,
             )
         else:
-            # A 是新的 → brief 变了 → 按新 brief 重建 Writer 上下文
+            # A 是新的 → brief / tips 变了 → 按新 brief 重建 Writer 上下文
             w_messages = build_messages(
-                "writer", history=history, blackboard=pre_bb, user_action=user_input, writing_brief=a.writing_brief
+                "writer", history=history, blackboard=pre_bb, user_action=user_input,
+                writing_brief=a.writing_brief, tips=a.tips,
             )
         chunks: list[str] = []
         async for tok in stream_writer(history, pre_bb, user_input, a.writing_brief, messages=w_messages, model=model_w):
@@ -135,13 +137,13 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
         # A、Writer 均保留 → B 上下文与原先逐字节相同 → 复用存档 messages(缓存命中)
         b_messages = json.loads(turn_n.director_b_messages or "[]") or build_messages(
             "director_review", history=history, blackboard=pre_bb, user_action=user_input,
-            narrative=narrative, director_a_plan=a.model_dump(),
+            narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips,
         )
     else:
         # 上游(A 或 Writer)变了 → 按现行成稿/预案重建 B 上下文
         b_messages = build_messages(
             "director_review", history=history, blackboard=pre_bb, user_action=user_input,
-            narrative=narrative, director_a_plan=a.model_dump(),
+            narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips,
         )
     new_bb = await run_director_review(
         history, pre_bb, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages, model=model_b

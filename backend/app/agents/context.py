@@ -22,7 +22,7 @@ from typing import Any, Literal
 
 from app.agents.loader import load_prompt
 
-AgentRole = Literal["director", "writer", "director_review", "illustrator"]
+AgentRole = Literal["director", "writer", "director_review", "options", "illustrator"]
 
 Message = dict[str, str]
 Blackboard = dict[str, Any]
@@ -68,6 +68,17 @@ def _render_blackboard(blackboard: Blackboard) -> str:
     黑板,因此本函数是纯函数,不引入任何随机/时间内容。"""
     body = json.dumps(_blackboard_view(blackboard), ensure_ascii=False, indent=2)
     return f"【当前黑板】\n{body}"
+
+
+def _render_tips(tips: list[str] | None) -> str:
+    """Director-A 摘给下游的「本轮相关设定提示」。只有 A 能看知识库,tips 是它向 Writer /
+    Director-B / Options / 绘图写稿 传递设定的唯一通道。放在易变区(user 消息)尾部 —— 不动
+    system + history 前缀,故不击穿缓存。空 / 无 tips → 返回空串(不渲染该块)。"""
+    items = [str(t).strip() for t in (tips or []) if str(t).strip()]
+    if not items:
+        return ""
+    body = "\n".join(f"- {t}" for t in items)
+    return f"【本轮设定提示(来自导演 A,源自设定参考,仅供你这一拍参考)】\n{body}"
 
 
 def _render_plan(plan: dict[str, Any]) -> str:
@@ -123,6 +134,7 @@ def build_messages(
     knowledge: str | None = None,
     visual_style: str | None = None,
     reference_catalog: str | None = None,
+    tips: list[str] | None = None,
 ) -> list[Message]:
     """构造发送给 DeepSeek 的 messages。
 
@@ -142,30 +154,31 @@ def build_messages(
         messages.append({"role": "system", "content": _render_knowledge(knowledge)})
     messages.extend(history)
 
+    # tips(导演 A 摘的本轮设定提示)在易变区尾部追加,不动 system+history 前缀 → 不击穿缓存。
+    # A 自己是产出方,绝不收 tips(结构上禁掉 director 角色,杜绝误传)。
+    tips_block = "" if agent_role == "director" else _render_tips(tips)
     if agent_role == "illustrator":
-        # 易变区:黑板 -> 画风圣经 -> 参考图库清单 -> 本轮绘图请求 -> 任务
-        tail = "\n\n".join(
-            [
-                _render_blackboard(blackboard),
-                f"【画风圣经】\n{visual_style or ''}",
-                f"【参考图库清单】\n{reference_catalog or '(空)'}",
-                f"【本轮绘图请求】\n{user_action}",
-                f"【任务】\n{ILLUSTRATOR_TASK}",
-            ]
-        )
+        # 易变区:黑板 -> 画风圣经 -> 参考图库清单 -> 本轮绘图请求 -> 任务 -> (tips)
+        parts = [
+            _render_blackboard(blackboard),
+            f"【画风圣经】\n{visual_style or ''}",
+            f"【参考图库清单】\n{reference_catalog or '(空)'}",
+            f"【本轮绘图请求】\n{user_action}",
+            f"【任务】\n{ILLUSTRATOR_TASK}",
+        ]
     else:
-        # 易变区:黑板 -> 玩家输入 -> 任务指令(顺序固定,位置同 M1/M2,逐字节不变)
-        tail = "\n\n".join(
-            [
-                _render_blackboard(blackboard),
-                f"【本轮玩家行动】\n{user_action}",
-                _task_tail(
-                    agent_role,
-                    writing_brief=writing_brief,
-                    narrative=narrative,
-                    director_a_plan=director_a_plan,
-                ),
-            ]
-        )
-    messages.append({"role": "user", "content": tail})
+        # 易变区:黑板 -> 玩家输入 -> 任务指令 -> (tips)(前三块顺序/位置同 M1/M2,逐字节不变)
+        parts = [
+            _render_blackboard(blackboard),
+            f"【本轮玩家行动】\n{user_action}",
+            _task_tail(
+                agent_role,
+                writing_brief=writing_brief,
+                narrative=narrative,
+                director_a_plan=director_a_plan,
+            ),
+        ]
+    if tips_block:
+        parts.append(tips_block)
+    messages.append({"role": "user", "content": "\n\n".join(parts)})
     return messages

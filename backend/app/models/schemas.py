@@ -44,7 +44,9 @@ class DirectorOutput(BaseModel):
     pacing: str = ""
     # ③ 总结性字段:把以上凝练成给下游的产物(此时已是深思熟虑的结果)
     writing_brief: str  # 综合以上的最终创作指引,压平为单一自然语言段(融合视角/详略节奏/须含要点/篇幅)
-    choices: list[str] = Field(default_factory=list)  # 给用户的可选引导项
+    # ④ 设定提示(放最后:A 想清 brief/beat 后再决定下传哪些设定):从它独有的知识库里摘取本轮情节
+    # 与绘图都可能用到的相关设定(世界观、角色性格/外观等),下传给看不到知识库的 Writer/B/Options/绘图写稿。
+    tips: list[str] = Field(default_factory=list)
 
 
 class ReferenceRef(BaseModel):

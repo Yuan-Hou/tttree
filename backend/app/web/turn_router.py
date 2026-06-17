@@ -89,7 +89,8 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
 
     # ---- Writer(逐 token 推)----
     w_messages = build_messages(
-        "writer", history=history, blackboard=blackboard, user_action=user_input, writing_brief=a.writing_brief
+        "writer", history=history, blackboard=blackboard, user_action=user_input,
+        writing_brief=a.writing_brief, tips=a.tips,
     )
     chunks: list[str] = []
     try:
@@ -105,7 +106,7 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
     # ---- Director-B ----
     b_messages = build_messages(
         "director_review", history=history, blackboard=blackboard, user_action=user_input,
-        narrative=narrative, director_a_plan=a.model_dump(),
+        narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips,
     )
     try:
         new_bb = await run_director_review(

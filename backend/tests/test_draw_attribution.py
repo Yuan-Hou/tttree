@@ -135,7 +135,7 @@ async def test_manual_draw_can_edit_refs_and_confirm_records_choice(tmp_path, mo
     Session = make_session_factory(engine)
     monkeypatch.setattr("app.web.draw_router.async_session", Session)
 
-    async def fake_illustrator(*, history, blackboard, draw_request, reference_catalog, visual_style=None, messages=None, model=None):
+    async def fake_illustrator(*, history, blackboard, draw_request, reference_catalog, visual_style=None, messages=None, model=None, tips=None):
         return IllustratorDraft(
             kind="reuse", prompt_text="稿",
             reference_manifest=[ReferenceRef(semantic_name="主角立绘", source="reference_asset", asset_id=1, purpose="锚定")],

@@ -13,8 +13,10 @@ import "@xyflow/react/dist/style.css";
 import { getSceneMap } from "../api";
 import type { SceneMap as SceneMapData } from "../types";
 import { SceneNode, type SceneNodeData } from "./SceneNode";
+import { SelfLoopEdge } from "./SelfLoopEdge";
 
 const nodeTypes = { scene: SceneNode };
+const edgeTypes = { selfloop: SelfLoopEdge };
 
 const NODE_W = 208; // 与 SceneNode 卡片宽度一致
 const ROW_H = 260; // 行距:留足竖直呼吸位,边标签不压上下节点
@@ -147,6 +149,7 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             fitView
             fitViewOptions={{ padding: 0.22, maxZoom: 1 }}
             minZoom={0.25}
@@ -273,20 +276,37 @@ function buildGraph(data: SceneMapData | null): { nodes: Node[]; edges: Edge[] }
   ];
 
   // ── 边 ──
-  const solid: Edge[] = data.solid_edges.map((e, i) => ({
-    id: `s${i}`,
-    source: e.from,
-    target: e.to,
-    data: { turnIndex: e.turn_index }, // 实线判别 + 点击跳转目标
-    label: e.beat ? `第${e.turn_index}拍 · ${e.beat}` : `第${e.turn_index}拍`,
-    labelStyle: { fontSize: 10, fill: "var(--color-ink-soft)" },
-    labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.9 },
-    labelBgPadding: [4, 2] as [number, number],
-    labelBgBorderRadius: 4,
-    type: "default",
-    markerEnd: { type: MarkerType.ArrowClosed, color: "#9aa4b0", width: 16, height: 16 },
-    style: { stroke: "var(--color-line-strong)", strokeWidth: 1.4, cursor: "pointer" },
-  }));
+  // 自环(起点=终点:这一轮停留在同一场景)走自定义 selfloop 边,画成节点顶上的弧线 + 回落箭头,
+  // 而非默认边那条横穿画布的直线。自定义边不自动渲染内置 label,故标签文本走 label prop、由组件自绘。
+  const solid: Edge[] = data.solid_edges.map((e, i) => {
+    const labelText = e.beat ? `第${e.turn_index}拍 · ${e.beat}` : `第${e.turn_index}拍`;
+    if (e.from === e.to) {
+      return {
+        id: `s${i}`,
+        source: e.from,
+        target: e.to,
+        type: "selfloop",
+        data: { turnIndex: e.turn_index }, // 实线判别 + 点击跳转目标(悬停/点击沿用)
+        label: labelText,
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#9aa4b0", width: 16, height: 16 },
+        style: { stroke: "var(--color-line-strong)", strokeWidth: 1.4, cursor: "pointer" },
+      };
+    }
+    return {
+      id: `s${i}`,
+      source: e.from,
+      target: e.to,
+      data: { turnIndex: e.turn_index }, // 实线判别 + 点击跳转目标
+      label: labelText,
+      labelStyle: { fontSize: 10, fill: "var(--color-ink-soft)" },
+      labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.9 },
+      labelBgPadding: [4, 2] as [number, number],
+      labelBgBorderRadius: 4,
+      type: "default",
+      markerEnd: { type: MarkerType.ArrowClosed, color: "#9aa4b0", width: 16, height: 16 },
+      style: { stroke: "var(--color-line-strong)", strokeWidth: 1.4, cursor: "pointer" },
+    };
+  });
 
   // 虚线:无向相邻,装饰无标签。id 用排序对,天然去重
   const dashed: Edge[] = data.dashed_edges.map((e) => ({

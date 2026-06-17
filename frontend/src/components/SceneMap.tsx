@@ -19,9 +19,11 @@ const nodeTypes = { scene: SceneNode };
 const edgeTypes = { selfloop: SelfLoopEdge };
 
 const NODE_W = 208; // 与 SceneNode 卡片宽度一致
-const ROW_H = 260; // 行距:留足竖直呼吸位,边标签不压上下节点
+const ROW_H = 260; // 行距:留足竖直呼吸位 + 自环弧线不压上方节点
 const X0 = 60;
 const Y0 = 30;
+const MIN_GAP = 64; // 无标签约束的相邻列之间的最小空白(节点间距)
+const LABEL_PAD = 18; // 标签宽之外再留的安全余量(确保连线文字不贴/不压节点)
 
 interface Props {
   storyId: string;
@@ -214,12 +216,10 @@ function buildGraph(data: SceneMapData | null): { nodes: Node[]; edges: Edge[] }
     }
   }
 
-  // ── 布局:origin_turn → 列 ──
-  // 列距自适应最长 beat 标签:实线标签「第N拍 · beat」居中在两列之间,列距需 > 节点宽 + 标签宽,
-  // 否则标签压到相邻节点上。按最长标签估宽(中文≈14px/字)留足横向呼吸位。
-  const maxLabelLen = data.solid_edges.reduce((m, e) => Math.max(m, 4 + (e.beat ? 3 + e.beat.length : 0)), 0);
-  const colW = Math.max(360, NODE_W + 120 + maxLabelLen * 14);
-
+  // ── 布局:origin_turn → 列(竖直居中 + 逐边界可变列距)──
+  // 列由 origin_turn 定左→右时序。横向:列距只按「恰好跨这道边界那条转移的标签宽」给 —— 短标签的
+  // 列自然靠近,不再被全局最长标签统一撑开。竖直:各列绕同一中线居中,单节点列正落在主时间线上,
+  // 变体节点上下对称展开(不再都堆在顶沿、下方留大片空白)。
   const turnVals = Array.from(
     new Set(data.nodes.map((n) => n.origin_turn).filter((t): t is number => t != null)),
   ).sort((a, b) => a - b);
@@ -228,21 +228,53 @@ function buildGraph(data: SceneMapData | null): { nodes: Node[]; edges: Edge[] }
   const nullCol = turnVals.length + 1; // origin_turn 缺失
   const ghostCol = turnVals.length + 2;
 
-  const rows: Record<number, number> = {};
-  const pos: Record<string, { x: number; y: number }> = {};
-  const place = (slug: string, col: number) => {
-    const r = rows[col] ?? 0;
-    rows[col] = r + 1;
-    pos[slug] = { x: X0 + col * colW, y: Y0 + r * ROW_H };
+  // 先把每个节点分到 (列, 行):列内按 slug 稳定排序、依次往下堆。
+  const colCount: Record<number, number> = {};
+  const cell: Record<string, { col: number; row: number }> = {};
+  const assign = (slug: string, col: number) => {
+    const r = colCount[col] ?? 0;
+    colCount[col] = r + 1;
+    cell[slug] = { col, row: r };
   };
+  assign(data.start, 0);
   [...data.nodes]
     .sort((a, b) => (a.origin_turn ?? 1e9) - (b.origin_turn ?? 1e9) || a.slug.localeCompare(b.slug))
-    .forEach((n) => place(n.slug, n.origin_turn != null ? (colOf.get(n.origin_turn) as number) : nullCol));
-  ghosts.forEach((g) => place(g, ghostCol));
+    .forEach((n) => assign(n.slug, n.origin_turn != null ? (colOf.get(n.origin_turn) as number) : nullCol));
+  ghosts.forEach((g) => assign(g, ghostCol));
 
-  // 起点:第 0 列,纵向居中
-  const maxRows = Math.max(1, ...Object.values(rows));
-  const startPos = { x: X0, y: Y0 + ((maxRows - 1) / 2) * ROW_H + 6 };
+  const colOfSlug = (slug: string) => cell[slug]?.col ?? ghostCol;
+  // 标签像素宽估算(fontSize 10 混排 + 背景内边距);偏保守留余量,确保文字不被遮挡。
+  const labelPx = (e: (typeof data.solid_edges)[number]) =>
+    Math.ceil((e.beat ? `第${e.turn_index}拍 · ${e.beat}` : `第${e.turn_index}拍`).length * 10.5) + 16;
+
+  // 逐边界列距:相邻两已用列之间,取「恰好跨这道边界」的转移的最长标签宽 + 余量;无则用最小列距。
+  const usedCols = Array.from(new Set(Object.values(cell).map((c) => c.col))).sort((a, b) => a - b);
+  const colX: Record<number, number> = {};
+  usedCols.forEach((c, i) => {
+    if (i === 0) {
+      colX[c] = X0;
+      return;
+    }
+    const prev = usedCols[i - 1];
+    let lw = 0;
+    for (const e of data.solid_edges) {
+      const lo = Math.min(colOfSlug(e.from), colOfSlug(e.to));
+      const hi = Math.max(colOfSlug(e.from), colOfSlug(e.to));
+      if (lo === prev && hi === c) lw = Math.max(lw, labelPx(e)); // 自环 lo==hi 不约束横向
+    }
+    const gap = Math.max(MIN_GAP, lw > 0 ? lw + LABEL_PAD : 0);
+    colX[c] = colX[prev] + NODE_W + gap;
+  });
+
+  // 竖直居中:各列绕同一中线对称展开(单节点列正落在中线 = 主时间线)。
+  const maxRows = Math.max(1, ...Object.values(colCount));
+  const yMid = Y0 + ((maxRows - 1) / 2) * ROW_H;
+  const pos: Record<string, { x: number; y: number }> = {};
+  for (const [slug, { col, row }] of Object.entries(cell)) {
+    const k = colCount[col];
+    pos[slug] = { x: colX[col], y: yMid + (row - (k - 1) / 2) * ROW_H };
+  }
+  const startPos = pos[data.start];
 
   const nodes: Node[] = [
     {

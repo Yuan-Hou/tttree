@@ -70,7 +70,8 @@ def render_reference_catalog(
     """渲染参考图库清单给绘图 Agent。
 
     history_images: [{"semantic_name": "场景名·状态", "image_path": "...", "note": "..."}]
-    对 Agent 只暴露语义名 + 用于判断相关性的说明 + 供清单回填的 asset_id/path;不含位置序号。
+    对 Agent 只暴露语义名 + 用于判断相关性的说明;参考库另给 asset_id 作回填句柄,历史图则只凭
+    语义名指代(原始 image_path 不进 Agent 视野,真实路径由后端按语义名权威回填)。不含位置序号。
     """
     lines: list[str] = []
     lines.append("参考图库(用户登记的素材,用其『语义名』指代):")
@@ -87,9 +88,7 @@ def render_reference_catalog(
     if history_images:
         for h in history_images:
             note = h.get("note", "")
-            lines.append(
-                f"- 语义名「{h['semantic_name']}」(image_path={h['image_path']}):{note}"
-            )
+            lines.append(f"- 语义名「{h['semantic_name']}」:{note}")
     else:
         lines.append("-(暂无历史生成图)")
 

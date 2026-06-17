@@ -53,6 +53,16 @@ async def build_history_catalog(
     return out
 
 
+def _backfill_history_paths(manifest: list[ReferenceRef], history_images: list[dict]) -> None:
+    """绘图 Agent 现在只凭语义名引用历史图(其视野里已无原始 image_path)。这里按语义名把真实
+    路径权威回填进 manifest —— 真实路径由后端掌握,Agent 写错/写空都不经手它。匹配不到的历史图
+    项 image_path 置空,下游(RefPicker 预选 / 出图解析)自然跳过,绝不误用 Agent 杜撰的路径。"""
+    by_name = {h["semantic_name"]: h["image_path"] for h in history_images}
+    for r in manifest:
+        if r.source == "history_image":
+            r.image_path = by_name.get(r.semantic_name)
+
+
 @dataclass
 class DraftBundle:
     scene_slug: str
@@ -104,6 +114,7 @@ async def prepare_draft(
     )
     if kind in ("new_scene", "variant"):
         draft.kind = kind  # 后端权威覆盖
+    _backfill_history_paths(draft.reference_manifest, history_imgs)  # 语义名 → 真实路径(后端权威)
     resolved = resolve_references(draft.reference_manifest, {a.id: a for a in assets})
     return DraftBundle(scene_slug=scene_slug, draft=draft, resolved=resolved, history=history_imgs)
 
@@ -140,6 +151,7 @@ async def write_illustration_draft(
     )
     if kind in ("new_scene", "variant"):
         draft.kind = kind
+    _backfill_history_paths(draft.reference_manifest, hist_imgs)  # 语义名 → 真实路径(后端权威)
     return used, draft
 
 

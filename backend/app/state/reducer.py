@@ -31,11 +31,19 @@ class ReducerResult:
 
 
 def _stamp_scene_origins(old_bb: Blackboard_t, new_bb: Blackboard_t, turn_index: int) -> None:
-    """给场景打「诞生点」origin_turn(M4.5-C 时间倒流语义的地基)。
+    """维护两类「reducer 权威、不信任 Director-B 回显」的场景字段:origin_turn 与 image_paths。
 
-    规则:本轮新出现的 scene_slug → origin_turn = 本轮;recall 复用的旧场景 → 保留其原
-    origin_turn 不变(诞生点不随回访改变)。origin_turn 由 reducer **权威维护**,不信任
-    Director-B 的回显——B 全量重写黑板不保证带它,这里就地覆盖正确值。
+    origin_turn(诞生点,M4.5-C 时间倒流语义的地基):
+      本轮新出现的 scene_slug → origin_turn = 本轮;recall 复用的旧场景 → 保留其原
+      origin_turn 不变(诞生点不随回访改变)。
+
+    image_paths(场景现有正典图简表,系统管理):
+      它**只**由出图流程(record_generation)在 reduce 之后按 scene_slug 追加,Director-B 被明确
+      要求留空、绝不该由它增删。因此这里一律以旧黑板该 slug 的 image_paths 为准原样承袭(新场景则
+      空),无视 B 的回显——否则 B 在改名/全量重写场景时极易把已出的图丢掉(曾导致某轮出的图在地图/
+      画廊消失,但 ImageGen 与绘图台仍在)。
+
+    二者同理:Director-B 全量重写黑板不保证带它们,reducer 就地覆盖成正确值。
 
     注意:场景存续判断(回退/重试用)依据的是 scene.origin_turn,**不是** ImageGen.source_turn;
     后者只是「这张图实际在哪一轮被生成」的审计信息,语义不同,切勿混用。图通过 scene_slug
@@ -50,6 +58,8 @@ def _stamp_scene_origins(old_bb: Blackboard_t, new_bb: Blackboard_t, turn_index:
             scene["origin_turn"] = prev["origin_turn"]  # 旧场景:保留诞生点(recall 不改)
         else:
             scene["origin_turn"] = turn_index  # 新场景:诞生于本轮
+        # image_paths 永远以旧黑板为准(新场景则空),无视 B 的回显,杜绝改名/重写丢图
+        scene["image_paths"] = list(prev.get("image_paths") or []) if isinstance(prev, dict) else []
 
 
 def _check_warnings(old_bb: Blackboard_t, new_bb: Blackboard_t) -> list[str]:

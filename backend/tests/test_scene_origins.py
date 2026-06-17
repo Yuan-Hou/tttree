@@ -64,6 +64,40 @@ async def test_origin_turn_stamped_and_recall_preserves(tmp_path):
     assert bb["scenes"]["attic"]["origin_turn"] == 3
 
 
+async def test_image_paths_preserved_across_director_b_rewrite(tmp_path):
+    """image_paths 由 reducer 权威承袭,不被 Director-B 改名/全量重写丢掉。
+    复现真实 bug:某场景出图后,下一轮 B 改名重写该场景且回显 image_paths=[] →
+    reducer 必须按 slug 把旧 image_paths 原样带过来,否则图在地图/画廊消失(ImageGen/绘图台仍在)。"""
+    Session = await _setup(tmp_path)
+    # 轮1:诞生 machine
+    await _turn(Session, _bb({"machine": _scene("糖水机")}, "machine"))
+    # 模拟出图:record_generation 在 reduce 之后向该场景 image_paths 追加一张
+    async with Session() as s:
+        row = await s.get(Blackboard, STORY)
+        bb = json.loads(row.json_blob)
+        bb["scenes"]["machine"]["image_paths"] = ["storage/images/m_t1.png"]
+        row.json_blob = json.dumps(bb, ensure_ascii=False)
+        await s.commit()
+    # 轮2:B 改名(name 变)且回显 image_paths=[](_scene 默认空)→ reducer 应保住旧图
+    await _turn(Session, _bb({"machine": _scene("糖水机周围")}, "machine"))
+    bb = await _current_bb(Session)
+    assert bb["scenes"]["machine"]["name"] == "糖水机周围"  # 改名生效
+    assert bb["scenes"]["machine"]["image_paths"] == ["storage/images/m_t1.png"]  # 但图没丢
+
+    # 轮2 再出一张图,轮3 B 再次全量重写 → 两张都在,顺序不乱
+    async with Session() as s:
+        row = await s.get(Blackboard, STORY)
+        bb = json.loads(row.json_blob)
+        bb["scenes"]["machine"]["image_paths"].append("storage/images/m_t2.png")
+        row.json_blob = json.dumps(bb, ensure_ascii=False)
+        await s.commit()
+    await _turn(Session, _bb({"machine": _scene("糖水机周围")}, "machine"))
+    bb = await _current_bb(Session)
+    assert bb["scenes"]["machine"]["image_paths"] == [
+        "storage/images/m_t1.png", "storage/images/m_t2.png",
+    ]
+
+
 async def test_reverse_query_scenes_and_images_born_in_turn(tmp_path):
     Session = await _setup(tmp_path)
     await _turn(Session, _bb({"entrance": _scene("入口")}, "entrance"))

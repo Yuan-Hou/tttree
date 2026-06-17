@@ -263,6 +263,7 @@ function buildGraph(data: SceneMapData | null): { nodes: Node[]; edges: Edge[] }
         slug: n.slug,
         originTurn: n.origin_turn,
         images: n.image_paths,
+        gallery: n.gallery ?? [],
         current: n.slug === data.current_scene,
       } satisfies SceneNodeData,
     })),

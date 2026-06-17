@@ -163,11 +163,17 @@ export interface StorySettings {
 }
 
 // ── 场景地图(静态,第一版):GET /story/{id}/scene-map ──
+export interface SceneMapGalleryItem {
+  path: string;
+  turn: number | null; // 该图属于第几拍
+  beat: string; // 该拍 beat 标题
+}
 export interface SceneMapNode {
   slug: string;
   name: string;
   origin_turn: number | null;
-  image_paths: string[]; // 正典图(进黑板那批);变体翻页 gallery 用,可空
+  image_paths: string[]; // 正典有效图(已剔除被取代图);与 gallery 同序,翻页用
+  gallery?: SceneMapGalleryItem[]; // 逐图带轮次/beat 标注,翻页标注据此对齐
 }
 export interface SceneMapSolidEdge {
   from: string; // 上一轮落点(首轮=start 哨兵)

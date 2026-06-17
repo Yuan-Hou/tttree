@@ -8,7 +8,8 @@ export interface SceneNodeData {
   name: string;
   slug?: string;
   originTurn?: number | null;
-  images?: string[]; // 正典变体图,可空
+  images?: string[]; // 正典有效变体图(已剔除被取代),可空
+  gallery?: { path: string; turn: number | null; beat: string }[]; // 与 images 同序,逐图带轮次/beat
   current?: boolean; // 当前所在场景 → 高亮
   hl?: boolean; // 动态交互:悬停某实线时,其终点节点高亮
   focused?: boolean; // 点对话聚焦本节点 → 高亮
@@ -55,10 +56,12 @@ export function SceneNode({ data }: NodeProps) {
 
 function SceneCard({ d }: { d: SceneNodeData }) {
   const images = d.images ?? [];
+  const gallery = d.gallery ?? [];
   const [i, setI] = useState(0);
   const lightbox = useLightbox();
   const idx = Math.min(i, Math.max(0, images.length - 1));
   const cur = images[idx];
+  const cap = gallery[idx]; // 当前页对应的轮次/beat 标注(与 images 同序对齐)
 
   const openLightbox = () => {
     if (images.length) lightbox(images.map((p) => ({ src: imgUrl(p), alt: d.name })), idx);
@@ -98,6 +101,12 @@ function SceneCard({ d }: { d: SceneNodeData }) {
           <div className="flex h-full w-full items-center justify-center text-[11px] text-ink-faint">
             尚无正典图
           </div>
+        )}
+        {/* 当前图的轮次/beat 标注:翻页随过滤后的有效图集对齐 */}
+        {cur && cap && cap.turn != null && (
+          <span className="absolute left-1 top-1 max-w-[85%] truncate rounded bg-ink/55 px-1.5 py-px font-mono text-[9.5px] text-paper">
+            第{cap.turn}拍{cap.beat ? ` · ${cap.beat}` : ""}
+          </span>
         )}
         {images.length > 1 && (
           <>

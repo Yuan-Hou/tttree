@@ -48,18 +48,27 @@ async def get_scene_map(story_id: str, session: AsyncSession = Depends(get_sessi
         for t in turn_rows
     ]
 
-    # 正典图(进黑板那批):给每条实线标注该轮为落点场景出的那张图
+    # 正典图(进黑板那批):给实线标注该轮的有效图、给节点 gallery 标注每图属于哪一拍。
+    # 按 id 升序 → build_scene_map 里同 (轮,场景) 取最新有效图、gallery 也按出图先后排列。
+    # 带 superseded 标记:被取代图从地图 gallery 过滤(展示职责留给「场景与画」)。
     img_rows = (
         await session.execute(
-            select(ImageGen).where(
+            select(ImageGen)
+            .where(
                 ImageGen.story_id == story_id,
                 ImageGen.origin == CANON_ORIGIN,
                 ImageGen.output_path != "",
             )
+            .order_by(ImageGen.id)
         )
     ).scalars().all()
     canon_images = [
-        {"source_turn": ig.source_turn, "scene_slug": ig.scene_slug, "output_path": ig.output_path}
+        {
+            "source_turn": ig.source_turn,
+            "scene_slug": ig.scene_slug,
+            "output_path": ig.output_path,
+            "superseded": ig.superseded,
+        }
         for ig in img_rows
     ]
 

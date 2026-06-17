@@ -73,6 +73,42 @@ def test_build_scene_map_pure():
     assert len(m["dashed_edges"]) == 2
 
 
+def test_node_gallery_filters_superseded_and_annotates_turns():
+    """修复五:同场景跨轮多图 + 同轮覆盖。地图节点 gallery 只显示有效图(被取代的剔除),
+    每张图带正确的轮次/beat 标注。复现:糖水机 第4拍出图(且第4拍内被覆盖过一次)、第5拍再出图。"""
+    scenes = {
+        "tang": {
+            "name": "糖水机", "origin_turn": 4,
+            # 黑板 image_paths 按出图先后累积三张,含被覆盖的 t4 旧图
+            "image_paths": [
+                "storage/images/t4_old.png", "storage/images/t4_new.png", "storage/images/t5.png",
+            ],
+            "connections": [],
+        },
+    }
+    turns = [
+        {"turn_index": 4, "beat_title": "投币", "bb_after": _bb(scenes, current="tang")},
+        {"turn_index": 5, "beat_title": "卡住", "bb_after": _bb(scenes, current="tang")},
+    ]
+    canon = [  # 按 id 升序;t4_old 被同轮 t4_new 取代
+        {"source_turn": 4, "scene_slug": "tang", "output_path": "storage/images/t4_old.png", "superseded": True},
+        {"source_turn": 4, "scene_slug": "tang", "output_path": "storage/images/t4_new.png", "superseded": False},
+        {"source_turn": 5, "scene_slug": "tang", "output_path": "storage/images/t5.png", "superseded": False},
+    ]
+    m = build_scene_map(_bb(scenes, current="tang"), turns, canon)
+    n = next(x for x in m["nodes"] if x["slug"] == "tang")
+
+    # gallery 只两张有效图,被覆盖的 t4_old 不出现
+    assert n["image_paths"] == ["storage/images/t4_new.png", "storage/images/t5.png"]
+    assert [g["path"] for g in n["gallery"]] == ["storage/images/t4_new.png", "storage/images/t5.png"]
+    # 每张图轮次/beat 标注与过滤后集合对齐
+    assert [(g["turn"], g["beat"]) for g in n["gallery"]] == [(4, "投币"), (5, "卡住")]
+    # 实线落点取该轮有效图(第4拍 → 新图,而非被覆盖的旧图)
+    se_by_turn = {e["turn_index"]: e for e in m["solid_edges"]}
+    assert se_by_turn[4]["image_path"] == "storage/images/t4_new.png"
+    assert se_by_turn[5]["image_path"] == "storage/images/t5.png"
+
+
 def test_solid_edge_count_equals_turns_with_missing_current_scene():
     """优雅退化:某轮 blackboard_after 缺 current_scene 时仍产出一条边(退化为自环),
     边数仍恒等于轮数。"""

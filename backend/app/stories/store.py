@@ -86,7 +86,8 @@ async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
         session.add(StorySettings(
             story_id=new_id, default_model=st.default_model,
             director_a_model=st.director_a_model, writer_model=st.writer_model,
-            director_b_model=st.director_b_model, illustrator_model=st.illustrator_model,
+            director_b_model=st.director_b_model, options_model=st.options_model,
+            illustrator_model=st.illustrator_model,
         ))
 
     # Turn(逐轮复制,含每步完整上下文 + 保留原逐轮时间戳)
@@ -98,7 +99,8 @@ async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
             story_id=new_id, turn_index=t.turn_index, beat_title=t.beat_title, user_input=t.user_input,
             narrative=t.narrative, director_a_json=t.director_a_json, director_b_json=t.director_b_json,
             blackboard_after=t.blackboard_after, director_a_messages=t.director_a_messages,
-            writer_messages=t.writer_messages, director_b_messages=t.director_b_messages, created_at=t.created_at,
+            writer_messages=t.writer_messages, director_b_messages=t.director_b_messages,
+            options_json=t.options_json, options_messages=t.options_messages, created_at=t.created_at,
         ))
 
     # 参考图库(file_path 共享同一磁盘文件)。复制会拿到新 id,记下 旧id→新id 映射以重写 ImageGen 引用。

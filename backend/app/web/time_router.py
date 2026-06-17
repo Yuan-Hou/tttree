@@ -68,8 +68,8 @@ async def put_step_context(
 ) -> dict:
     """改写某轮某步的输入记录(直接改 M4.5-B 存的那份 messages)。仅最新轮可编辑:历史轮不能
     重试,编辑它无意义,且避免误动时间线 —— 要改历史轮,先回退到那一轮。"""
-    if step not in ("director_a", "writer", "director_b"):
-        raise HTTPException(400, "step 应为 director_a / writer / director_b")
+    if step not in ("director_a", "writer", "director_b", "options"):
+        raise HTTPException(400, "step 应为 director_a / writer / director_b / options")
     latest = (
         await session.execute(select(func.max(Turn.turn_index)).where(Turn.story_id == story_id))
     ).scalar()

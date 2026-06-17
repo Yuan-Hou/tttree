@@ -47,7 +47,9 @@ async def test_fork_is_complete_independent_and_shares_files(tmp_path):
                           writer_narrative="n1", director_a_json="{}", user_input="u1", session=s,
                           director_a_messages='[{"role":"system","content":"A轮1"}]',
                           writer_messages='[{"role":"system","content":"W轮1"}]',
-                          director_b_messages='[{"role":"system","content":"B轮1"}]')
+                          director_b_messages='[{"role":"system","content":"B轮1"}]',
+                          options_json='{"options":["选项甲","选项乙"]}',
+                          options_messages='[{"role":"system","content":"O轮1"}]')
     # 参考图 + 一张引用了该参考图的生成图(磁盘路径共享)
     async with Session() as s:
         ref = ReferenceAsset(story_id=sid, label="主角立绘", description="", category="角色",
@@ -85,6 +87,8 @@ async def test_fork_is_complete_independent_and_shares_files(tmp_path):
     async with Session() as s:
         t1 = (await s.execute(select(Turn).where(Turn.story_id == nsid, Turn.turn_index == 1))).scalar_one()
         assert "A轮1" in t1.director_a_messages and "W轮1" in t1.writer_messages
+        assert json.loads(t1.options_json)["options"] == ["选项甲", "选项乙"]  # Options 输出
+        assert "O轮1" in t1.options_messages  # Options 上下文
 
     # 图片文件物理共享:路径与原档相同(不复制文件)
     async with Session() as s:

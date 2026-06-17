@@ -3,16 +3,20 @@
 在当前最新一轮,从指定切入点重走,复用现有三段式执行逻辑(run_director / stream_writer /
 run_director_review / reduce_turn),不另写一套 agent 调用:
 
-  - 从 A 前(director_a) → 整轮重来:A→Writer→B
-  - 从 Writer 前(writer) → 保留本轮 A,重走 Writer→B
-  - 从 B 前(director_b) → 保留本轮 A、Writer,只重走 B
+  - 从 A 前(director_a) → 整轮重来:A→Writer→(B ∥ Options)
+  - 从 Writer 前(writer) → 保留本轮 A,重走 Writer→(B ∥ Options)
+  - 从 B 前(director_b) → 保留本轮 A、Writer,只重走 B(Options 保留不动)
+  - 从 Options(options) → 叶子自重试:只重跑 Options 本身,不 rollback/reduce、不碰 B/场景/叙事
+
+Options 是 Writer 后与 B 并行的叶子(依赖 Writer 成稿 + tips):上游(A/Writer)重走 → 连带重跑
+Options;B 与 Options 是并行兄弟,互不影响(B 重走不动 Options,Options 重走不动 B)。
 
 切入点之后的旧结果直接丢弃、用重走的新结果覆盖(不留旧结果做历史;要保留请用副本)。
 重走复用 M4.5-B 存的该轮上下文:**被保留的前序结果不变 → 第一个重走的 agent 的上下文
 与原先逐字节相同,直接复用存档的 messages(缓存命中)**;其上游一旦变化(如新 A 改了 brief、
 新 Writer 改了成稿),下游 agent 的上下文按现行结果重新构造。
 
-场景(核心规则):重试的三个切入点都会重走 B,故每次都:作废本轮原 B 诞生的场景(随黑板回滚
+场景(核心规则):前三个切入点(A/Writer/B)都会重走 B,故每次都:作废本轮原 B 诞生的场景(随黑板回滚
 到本轮之前自然消失,图引用解除、ImageGen 记录与磁盘文件保留)+ 新 B 重新诞生场景
 (reduce 给新场景打 origin_turn=本轮)。复用 rollback_latest_turn 做作废、reduce_turn 做新生。
 
@@ -29,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.context import build_messages
 from app.agents.director import run_director
 from app.agents.director_review import run_director_review
+from app.agents.options import run_options
 from app.agents.writer import stream_writer
 from app.db.models import Blackboard, Turn
 from app.knowledge.store import get_knowledge
@@ -39,7 +44,7 @@ from app.stories.store import empty_blackboard
 from app.turns.rollback import rollback_latest_turn
 from app.turns.scene_origins import scenes_born_in_turn
 
-ENTRY_POINTS = ("director_a", "writer", "director_b")
+ENTRY_POINTS = ("director_a", "writer", "director_b", "options")
 
 
 @dataclass
@@ -99,6 +104,28 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
     model_a = resolve_agent_model(st, "director_a")
     model_w = resolve_agent_model(st, "writer")
     model_b = resolve_agent_model(st, "director_b")
+    model_o = resolve_agent_model(st, "options")
+
+    # ---- Options 叶子自重试:只重跑 Options,不动 B/场景/叙事/黑板 ----
+    # 它依赖本轮 Writer 成稿 + A 的 tips(都保留)→ 上下文与原先逐字节相同,复用存档 messages(缓存命中)。
+    # 就地覆写 turn_n 的 options 两列即可,无 rollback、无 reduce。
+    if entry == "options":
+        a = DirectorOutput.model_validate_json(turn_n.director_a_json)
+        narrative = turn_n.narrative
+        o_messages = json.loads(turn_n.options_messages or "[]") or build_messages(
+            "options", history=history, blackboard=pre_bb, user_action=user_input,
+            narrative=narrative, tips=a.tips,
+        )
+        options_out = await run_options(
+            history, pre_bb, user_input, narrative, tips=a.tips, messages=o_messages, model=model_o
+        )
+        turn_n.options_json = options_out.model_dump_json()
+        turn_n.options_messages = json.dumps(o_messages, ensure_ascii=False)
+        await session.commit()
+        return RetryResult(
+            ok=True, entry="options", turn_index=n, narrative=narrative,
+            blackboard=json.loads(turn_n.blackboard_after) if turn_n.blackboard_after else {},
+        )
 
     # ---- Director-A:新走(director_a 切入)或保留 ----
     # A 的上下文只取决于「本轮之前的状态」,重试时不变 → 存档的 director_a_messages 始终是其正确上下文。
@@ -149,7 +176,26 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
         history, pre_bb, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages, model=model_b
     )
 
-    # ---- 三段跑完,才动 DB ----
+    # ---- Options(B 的并行兄弟):director_b 切入 → 保留原 Options;上游(A/Writer)切入 → 连带重跑 ----
+    # 必须在 rollback 删 turn_n 之前把要保留的两列读进局部变量。重跑失败不阻断重试(options 落空)。
+    if entry == "director_b":
+        options_json = turn_n.options_json or ""
+        options_messages = turn_n.options_messages or ""
+    else:
+        o_messages = build_messages(
+            "options", history=history, blackboard=pre_bb, user_action=user_input,
+            narrative=narrative, tips=a.tips,
+        )
+        try:
+            options_out = await run_options(
+                history, pre_bb, user_input, narrative, tips=a.tips, messages=o_messages, model=model_o
+            )
+            options_json = options_out.model_dump_json()
+        except Exception:  # Options 失败不阻断重试
+            options_json = ""
+        options_messages = json.dumps(o_messages, ensure_ascii=False)
+
+    # ---- 全部跑完,才动 DB ----
     # 1) 作废原轮:回滚黑板到本轮之前 + 删除原 Turn N → 原 B 诞生的场景随之消失(图资产保留)。
     rb = await rollback_latest_turn(session, story_id)
     invalidated = rb.released_scene_slugs
@@ -164,6 +210,8 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
         director_a_messages=json.dumps(a_messages, ensure_ascii=False),
         writer_messages=json.dumps(w_messages, ensure_ascii=False),
         director_b_messages=json.dumps(b_messages, ensure_ascii=False),
+        options_json=options_json,
+        options_messages=options_messages,
     )
 
     return RetryResult(

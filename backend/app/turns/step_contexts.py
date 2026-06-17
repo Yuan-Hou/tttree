@@ -17,11 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.context import Message
 from app.db.models import Turn
 
-# 三个 agent 步 → Turn 表对应列名
+# agent 步 → Turn 表对应列名(options 是 Writer 后与 B 并行的叶子,显微镜可看/可编辑重试)
 _STEP_COLUMNS = {
     "director_a": "director_a_messages",
     "writer": "writer_messages",
     "director_b": "director_b_messages",
+    "options": "options_messages",
 }
 
 

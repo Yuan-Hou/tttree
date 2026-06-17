@@ -52,6 +52,8 @@ async def get_turn_contexts(
         "writer": {"messages": ctx["writer"], "output": turn.narrative},
         # B 的输出 = 落盘后的权威新黑板(reducer 已盖 origin_turn);这是导演真正关心的「这一轮把世界改成了什么」。
         "director_b": {"messages": ctx["director_b"], "output": _loads(turn.blackboard_after)},
+        # Options 的输出 = 它给的下一步选项(OptionsOutput JSON);失败/老数据 → None。
+        "options": {"messages": ctx["options"], "output": _loads(turn.options_json)},
     }
 
 

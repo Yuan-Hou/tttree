@@ -49,6 +49,19 @@ class DirectorOutput(BaseModel):
     tips: list[str] = Field(default_factory=list)
 
 
+class OptionsOutput(BaseModel):
+    """Options agent 的输出:给玩家的 1–3 个「下一步可选项」。
+
+    叶子节点,Writer 成稿后与 Director-B 并行跑、互不依赖,只读成稿 + 黑板 + tips。不影响落盘
+    (reducer 只等 B)。沿用 A 的宽松容错原则:`extra="ignore"`,options 是自然语言短句列表,
+    模型多输出的字段静默忽略,不拿严格类型当硬闸门打断回合。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    options: list[str] = Field(default_factory=list)  # 1–3 个下一步可选项,自然语言短句
+
+
 class ReferenceRef(BaseModel):
     """提示词稿引用清单的一项:语义名 → 实际图(参考库 asset_id 或历史图 path)。"""
 

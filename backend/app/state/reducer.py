@@ -114,6 +114,8 @@ async def reduce_turn(
     director_a_messages: str = "",
     writer_messages: str = "",
     director_b_messages: str = "",
+    options_json: str = "",
+    options_messages: str = "",
 ) -> ReducerResult:
     # 读旧黑板 + 当前最大 turn_index(turn_index 由代码维护)
     old_row = await session.get(Blackboard, story_id)
@@ -179,6 +181,8 @@ async def reduce_turn(
             director_a_messages=director_a_messages,
             writer_messages=writer_messages,
             director_b_messages=director_b_messages,
+            options_json=options_json,
+            options_messages=options_messages,
         )
     )
 

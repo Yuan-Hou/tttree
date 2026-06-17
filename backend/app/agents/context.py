@@ -31,6 +31,7 @@ STYLE_BIBLE = load_prompt("style_bible.md")
 DIRECTOR_TASK = load_prompt("director_task.md")
 WRITER_TASK = load_prompt("writer_task.md")
 DIRECTOR_REVIEW_TASK = load_prompt("director_review_task.md")
+OPTIONS_TASK = load_prompt("options_task.md")
 ILLUSTRATOR_TASK = load_prompt("illustrator_task.md")
 
 
@@ -119,6 +120,11 @@ def _task_tail(
         if director_a_plan is not None:
             parts.append(_render_plan(director_a_plan))
         return "\n\n".join(parts)
+    if agent_role == "options":
+        if narrative is None:
+            raise ValueError("options 角色必须提供 narrative(Writer 成稿)")
+        # 只读成稿 + 黑板 + tips(易变区尾部),不附 A 预案 —— Options 站在玩家位置看「已写成的当下」。
+        return f"【任务】\n{OPTIONS_TASK}\n\n【本轮 Writer 成稿】\n{narrative}"
     raise ValueError(f"未知 agent_role: {agent_role}")
 
 

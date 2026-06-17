@@ -58,7 +58,7 @@ _BY_ID: dict[str, ModelChoice] = {m.id: m for m in MODEL_CHOICES}
 DEFAULT_MODEL_ID = "deepseek-v4-pro"
 
 # 可单独配置模型的 agent(与 StorySettings 的 *_model 列一一对应)
-AGENT_KEYS: tuple[str, ...] = ("director_a", "writer", "director_b", "illustrator")
+AGENT_KEYS: tuple[str, ...] = ("director_a", "writer", "director_b", "options", "illustrator")
 
 
 @lru_cache

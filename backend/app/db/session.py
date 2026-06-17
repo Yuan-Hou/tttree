@@ -38,6 +38,16 @@ def _add_missing_columns(conn) -> None:
     if "superseded" not in cols:
         conn.execute(text("ALTER TABLE image_gens ADD COLUMN superseded BOOLEAN NOT NULL DEFAULT 0"))
 
+    # Options agent(里程碑:tips + 选项):turns 存它的输出与上下文、story_settings 存它的模型覆盖。
+    turn_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(turns)")).fetchall()}
+    if turn_cols:  # 表已存在(旧库)才补;全新库由 create_all 直接带列
+        for col in ("options_json", "options_messages"):
+            if col not in turn_cols:
+                conn.execute(text(f"ALTER TABLE turns ADD COLUMN {col} TEXT DEFAULT ''"))
+    ss_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(story_settings)")).fetchall()}
+    if ss_cols and "options_model" not in ss_cols:
+        conn.execute(text("ALTER TABLE story_settings ADD COLUMN options_model VARCHAR DEFAULT ''"))
+
 
 # 应用级默认引擎/会话工厂(仅在被实际使用时才会创建 DB 文件)
 engine = make_engine()

@@ -138,9 +138,15 @@ async def turn_env(tmp_path, monkeypatch):
         seen["director_b"] = model
         return _bb()  # 合法黑板 → reduce 正常落库,证明切模型后 JSON 路径仍可靠
 
+    async def fake_options(*a, model=None, **k):
+        seen["options"] = model
+        from app.models.schemas import OptionsOutput
+        return OptionsOutput(options=["往前走", "退回去"])
+
     monkeypatch.setattr("app.web.turn_router.run_director", fake_director)
     monkeypatch.setattr("app.web.turn_router.stream_writer", fake_writer)
     monkeypatch.setattr("app.web.turn_router.run_director_review", fake_review)
+    monkeypatch.setattr("app.web.turn_router.run_options", fake_options)
 
     from app.main import app
 
@@ -161,7 +167,10 @@ async def test_turn_uses_per_agent_models(turn_env):
     body = r.text  # 读完短命 SSE → 生成器跑完(含 reduce 落库)
     assert "turn_done" in body
 
-    assert seen == {"director_a": DEFAULT_MODEL_ID, "writer": "gpt-5.5", "director_b": DEFAULT_MODEL_ID}
+    assert seen == {
+        "director_a": DEFAULT_MODEL_ID, "writer": "gpt-5.5",
+        "director_b": DEFAULT_MODEL_ID, "options": DEFAULT_MODEL_ID,
+    }
     # JSON 路径仍可靠:该轮已正常落库
     async with Session() as s:
         n = (await s.execute(select(Turn).where(Turn.story_id == sid))).scalars().all()

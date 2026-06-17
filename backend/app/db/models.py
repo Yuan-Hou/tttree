@@ -73,6 +73,10 @@ class Turn(Base):
     director_a_messages: Mapped[str] = mapped_column(Text, default="")
     writer_messages: Mapped[str] = mapped_column(Text, default="")
     director_b_messages: Mapped[str] = mapped_column(Text, default="")
+    # Options agent(Writer 后与 B 并行的叶子):它的输出(OptionsOutput JSON)+ 喂进去的完整 messages。
+    # 与 director_*_messages 同性质(显微镜可看、回退/重试复用)。Options 失败/老数据 → 空串。
+    options_json: Mapped[str] = mapped_column(Text, default="")
+    options_messages: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -133,6 +137,7 @@ class StorySettings(Base):
     director_a_model: Mapped[str] = mapped_column(String, default="")  # 空 = 用全局默认
     writer_model: Mapped[str] = mapped_column(String, default="")
     director_b_model: Mapped[str] = mapped_column(String, default="")
+    options_model: Mapped[str] = mapped_column(String, default="")
     illustrator_model: Mapped[str] = mapped_column(String, default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False

@@ -41,6 +41,23 @@ export function AgentFlow({ stages, draws, writingIds, generatingIds, selectedId
       } satisfies AgentNodeData,
     }));
 
+    // Options:Writer 后与 Director-B 并行的叶子,放在 B 正下方,不连 reducer。
+    ns.push({
+      id: "options",
+      type: "agent",
+      position: { x: 524, y: 210 },
+      draggable: false,
+      data: {
+        glyph: "⌥",
+        title: "选项",
+        subtitle: "据成稿出 1–3 个下一步可选项",
+        status: stages.options,
+        selected: selectedId === "options",
+        variant: "main",
+        onSelect: () => onSelectNode("options"),
+      } satisfies AgentNodeData,
+    });
+
     draws.forEach((it, i) => {
       const y = 18 + i * 132;
       const { draft: draftStatus, img: imgStatus } = drawNodeStatuses(it, writingIds, generatingIds);
@@ -88,6 +105,11 @@ export function AgentFlow({ stages, draws, writingIds, generatingIds, selectedId
       const active = stages[target] === "running";
       e.push({ id: `${s}-${target}`, source: s, target, animated: active, style: edgeStyle(active) });
     });
+    // Writer → Options(与 Writer → Director-B 并列的分叉;Options 不连 reducer)
+    {
+      const active = stages.options === "running";
+      e.push({ id: "writer-options", source: "writer", target: "options", animated: active, style: edgeStyle(active) });
+    }
     draws.forEach((it, i) => {
       const st = drawNodeStatuses(it, writingIds, generatingIds);
       e.push({

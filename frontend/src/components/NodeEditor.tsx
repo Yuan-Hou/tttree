@@ -19,6 +19,7 @@ const TITLE: Record<AgentStep, string> = {
   director_a: "导演 A",
   writer: "写手",
   director_b: "导演 B",
+  options: "选项(Options)",
   reducer: "落盘(reducer)",
 };
 const ROLE_LABEL: Record<string, string> = {

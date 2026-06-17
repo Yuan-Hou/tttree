@@ -8,6 +8,7 @@ const AGENTS: { key: string; label: string; hint: string }[] = [
   { key: "director_a", label: "导演 A · 预案", hint: "读黑板 + 知识库,定本轮写作纲要" },
   { key: "writer", label: "写作", hint: "据纲要写叙事正文(纯文本流)" },
   { key: "director_b", label: "导演 B · 复盘", hint: "据成稿重写黑板、提配图建议" },
+  { key: "options", label: "选项 · 下一步", hint: "据成稿出 1–3 个下一步可选项(与 B 并行)" },
   { key: "illustrator", label: "绘图写稿", hint: "为出图写提示词稿(JSON)" },
 ];
 

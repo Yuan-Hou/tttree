@@ -45,8 +45,9 @@ interface Props {
   reloadScope: () => Promise<void>;
 }
 
+// 线性主轴(不含 options —— options 是 Writer 后与 B 并行的叶子,单独处理)
 const ORDER: AgentStep[] = ["director_a", "writer", "director_b", "reducer"];
-const ALL_DONE: LiveStages = { director_a: "done", writer: "done", director_b: "done", reducer: "done" };
+const ALL_DONE: LiveStages = { director_a: "done", writer: "done", director_b: "done", options: "done", reducer: "done" };
 
 type Sel =
   | { kind: "step"; step: AgentStep }
@@ -96,17 +97,28 @@ export function Workbench(p: Props) {
   let stages: LiveStages = ALL_DONE;
   if (isLive && p.liveStages) stages = p.liveStages;
   else if (p.retrying && isLatest) {
-    const from = ORDER.indexOf(p.retrying);
-    stages = ORDER.reduce((acc, s, i) => {
-      acc[s] = (i >= from ? "running" : "done") as StepStatus;
-      return acc;
-    }, {} as LiveStages);
+    if (p.retrying === "options") {
+      // 叶子自重试:只 options 转"运行中",主轴保持全完成
+      stages = { ...ALL_DONE, options: "running" };
+    } else {
+      const from = ORDER.indexOf(p.retrying);
+      stages = ORDER.reduce((acc, s, i) => {
+        acc[s] = (i >= from ? "running" : "done") as StepStatus;
+        return acc;
+      }, {} as LiveStages);
+      // 上游(A/Writer)重走 → 连带重跑 Options;B 重走则 Options 保留(done)
+      stages.options = p.retrying === "director_a" || p.retrying === "writer" ? "running" : "done";
+    }
   } else if (failedView && p.liveError) {
     const fi = ORDER.indexOf(p.liveError.step);
     stages = ORDER.reduce((acc, s, i) => {
       acc[s] = (i < fi ? "done" : i === fi ? "error" : "pending") as StepStatus;
       return acc;
     }, {} as LiveStages);
+    stages.options = "pending"; // 失败的提交未走到/未落 Options
+  } else if (p.liveError?.step === "options" && isLatest && !isLive && p.retrying === null) {
+    // Options 失败不阻断落盘 → 该轮照常完成,但 options 节点标红展示其失败
+    stages = { ...ALL_DONE, options: "error" };
   }
 
   // 绘图支流:进行中的轮用本轮的实时提案;否则用落盘后取回的 draws。

@@ -7,6 +7,7 @@ const STEP_LABEL: Record<AgentStep, string> = {
   director_a: "导演 A",
   writer: "写手",
   director_b: "导演 B",
+  options: "选项",
   reducer: "落盘",
 };
 
@@ -33,6 +34,7 @@ const STAGES_AT_SUBMIT: LiveStages = {
   director_a: "running",
   writer: "pending",
   director_b: "pending",
+  options: "pending",
   reducer: "pending",
 };
 
@@ -87,6 +89,8 @@ export function useStoryEngine() {
   const [drafts, setDrafts] = useState<DraftCard[]>([]);
   const [pending, setPending] = useState<PendingImage[]>([]);
   const [turnStreaming, setTurnStreaming] = useState(false);
+  // 本轮 Options 给出的下一步可选项(输入框上方展示);新一轮/切故事/回退时清空。
+  const [options, setOptions] = useState<string[]>([]);
   // 正在写稿/出图的 proposal_id —— 提到引擎层(而非工作台本地),关掉重开工作台/切节点都不丢「运行中」。
   const [writingIds, setWritingIds] = useState<number[]>([]);
   const [generatingIds, setGeneratingIds] = useState<number[]>([]);
@@ -168,6 +172,7 @@ export function useStoryEngine() {
       setPending([]);
       setWritingIds([]);
       setGeneratingIds([]);
+      setOptions([]);
       setTurnStreaming(false);
       setRetrying(null);
       setLiveError(null);
@@ -222,6 +227,7 @@ export function useStoryEngine() {
       ]);
       setTurnStreaming(true);
       setLiveError(null); // 新一轮开始,清掉上次的失败详情
+      setOptions([]); // 清掉上一轮的选项,本轮 options_proposed 再填
       // 工作台锚到这一笔尝试(latest+1)。若在 turn_started 前就失败(如导演A),它仍能落到
       // 「失败的提交」格(比最新已落盘轮靠后),不会把上一正常轮误当成失败轮。
       setScopeTurn((latestTurn ?? 0) + 1);
@@ -240,17 +246,25 @@ export function useStoryEngine() {
             patch((t) => ({ ...t, turn_index: ev.turn_index }));
             setLiveTurn(ev.turn_index);
             setScopeTurn(ev.turn_index); // 工作台开着时,跟随这一轮
-            setLiveStages({ director_a: "done", writer: "running", director_b: "pending", reducer: "pending" });
+            setLiveStages({ director_a: "done", writer: "running", director_b: "pending", options: "pending", reducer: "pending" });
           } else if (ev.type === "narrative_token")
             patch((t) => ({ ...t, narrative: t.narrative + ev.text }));
           else if (ev.type === "narrative_done") {
             patch((t) => ({ ...t, narrative: ev.full_narrative }));
-            setLiveStages({ director_a: "done", writer: "done", director_b: "running", reducer: "pending" });
+            // 成稿后 B 与 Options 并行启动 → 两节点同时点亮"运行中",各自完成各自变 done
+            setLiveStages({ director_a: "done", writer: "done", director_b: "running", options: "running", reducer: "pending" });
           } else if (ev.type === "state_updated") {
             setBlackboard(ev.blackboard);
             setScenesImages((prev) => ({ ...prev, ...scenesImagesOf(ev.blackboard) }));
             patch((t) => ({ ...t, beat_title: ev.beat_title }));
-            setLiveStages({ director_a: "done", writer: "done", director_b: "done", reducer: "done" });
+            // B+reduce 完成:只点亮 director_b/reducer,保留 options 当前态(它独立完成)
+            setLiveStages((s) => (s ? { ...s, director_b: "done", reducer: "done" } : s));
+          } else if (ev.type === "options_proposed") {
+            setOptions(ev.options);
+            setLiveStages((s) => (s ? { ...s, options: "done" } : s));
+          } else if (ev.type === "options_failed") {
+            setLiveStages((s) => (s ? { ...s, options: "error" } : s));
+            setLiveError({ step: "options", reason: ev.reason });
           } else if (ev.type === "draw_proposed") setProposals((p) => [...ev.proposals, ...p]);
           else if (ev.type === "error") {
             const step = parseErrStep(ev.reason);
@@ -443,7 +457,7 @@ export function useStoryEngine() {
 
   // 编辑节点输入记录:直接改 M4.5-B 存的那份 messages(仅最新轮)。
   const saveStepContext = useCallback(
-    async (turnIndex: number, step: "director_a" | "writer" | "director_b", messages: { role: string; content: string }[]) => {
+    async (turnIndex: number, step: "director_a" | "writer" | "director_b" | "options", messages: { role: string; content: string }[]) => {
       const id = curRef.current;
       if (!id) return;
       await api.saveStepContext(id, turnIndex, step, messages);
@@ -464,6 +478,7 @@ export function useStoryEngine() {
     const r = await api.rollback(id);
     if (r?.ok === false || r?.detail) return;
     await loadSnapshot(id);
+    setOptions([]); // 回退后旧选项不再适用
     setScopeTurn(r.new_latest_turn ?? null); // 跟到回退后的新最新轮(回退掉首轮则为 null)
     bumpAll();
     refreshStories();
@@ -478,6 +493,7 @@ export function useStoryEngine() {
       try {
         await api.retry(id, entry); // 真 LLM 重走(用改后的输入记录),完成后刷新显微镜与叙事
         await loadSnapshot(id);
+        setOptions([]); // 时间操作重置临时选项条;重走后的选项见工作台 Options 节点输出
         setScopeTurn(latestTurn);
         bumpAll();
       } catch (e) {
@@ -523,7 +539,7 @@ export function useStoryEngine() {
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   return {
-    stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, supersededImages, proposals, drafts, pending, turnStreaming,
+    stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, supersededImages, proposals, drafts, pending, turnStreaming, options,
     refreshStories, selectStory, createStory, removeStory, submitTurn,
     openDraft, openDraftForProposal, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, startDraftFromProposal,
     // 工作台 + 时间控制

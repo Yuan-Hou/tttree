@@ -89,7 +89,7 @@ export const pictureDraw = (
 export const saveStepContext = (
   id: string,
   turnIndex: number,
-  step: "director_a" | "writer" | "director_b",
+  step: "director_a" | "writer" | "director_b" | "options",
   messages: ContextMessage[],
 ) =>
   fetch(`/story/${id}/turn/${turnIndex}/contexts/${step}`, {
@@ -104,7 +104,7 @@ export const saveStepContext = (
 export const rollback = (id: string) =>
   fetch(`/story/${id}/rollback`, { method: "POST", headers: json }).then((r) => r.json());
 
-export const retry = (id: string, entry: "director_a" | "writer" | "director_b") =>
+export const retry = (id: string, entry: "director_a" | "writer" | "director_b" | "options") =>
   fetch(`/story/${id}/retry`, { method: "POST", headers: json, body: JSON.stringify({ entry }) }).then(
     async (r) => {
       if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);

@@ -212,9 +212,10 @@ export interface TurnContexts {
   director_a: StepContext;
   writer: StepContext;
   director_b: StepContext;
+  options: StepContext; // Writer 后与 B 并行的叶子:下一步选项
 }
 
-export type AgentStep = "director_a" | "writer" | "director_b" | "reducer";
+export type AgentStep = "director_a" | "writer" | "director_b" | "options" | "reducer";
 export type StepStatus = "pending" | "running" | "done" | "error";
 
 // ── 绘图支流(每个绘图提案 = 写稿 + 绘图 双节点)。与绘图台同源:DrawProposal 表 ──
@@ -249,6 +250,8 @@ export type TurnEvent =
   | { type: "narrative_done"; full_narrative: string }
   | { type: "state_updated"; blackboard: Blackboard; beat_title: string }
   | { type: "draw_proposed"; proposals: DrawProposal[] }
+  | { type: "options_proposed"; options: string[] }
+  | { type: "options_failed"; reason: string }
   | { type: "turn_done" }
   | { type: "error"; reason: string };
 

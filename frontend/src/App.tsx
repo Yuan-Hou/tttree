@@ -3,6 +3,7 @@ import { useStoryEngine } from "./useStoryEngine";
 import { Bookshelf } from "./components/Bookshelf";
 import { ReadingColumn } from "./components/ReadingColumn";
 import { Composer } from "./components/Composer";
+import { OptionChips } from "./components/OptionChips";
 import { StatePanel } from "./components/StatePanel";
 import { ScenesPanel } from "./components/ScenesPanel";
 import { DrawDeck } from "./components/DrawDeck";
@@ -26,6 +27,10 @@ export function App() {
   const focusTurnOnMap = useCallback((turnIndex: number) => {
     setFocusReq({ turnIndex, nonce: Date.now() });
   }, []);
+
+  // 选项预填:点输入框上方某条 Options 建议 → 填进 Composer(nonce 保证连点同一条也重填)。
+  const [prefill, setPrefill] = useState<{ text: string; key: number } | null>(null);
+  const pickOption = useCallback((text: string) => setPrefill({ text, key: Date.now() }), []);
 
   // 地图随故事推进/新出图自动刷新:轮数、正典图总数、绘图版本、当前场景任一变 → 重取地图
   const canonImageCount = useMemo(
@@ -87,7 +92,14 @@ export function App() {
         {e.curId ? (
           <>
             <ReadingColumn turns={e.turns} onTurnClick={focusTurnOnMap} onDismissFailure={e.dismissFailure} />
-            <Composer disabled={!e.curId} streaming={e.turnStreaming} onSubmit={e.submitTurn} />
+            <OptionChips options={e.options} disabled={e.turnStreaming} onPick={pickOption} />
+            <Composer
+              disabled={!e.curId}
+              streaming={e.turnStreaming}
+              onSubmit={e.submitTurn}
+              prefillText={prefill?.text}
+              prefillKey={prefill?.key}
+            />
           </>
         ) : (
           <EmptyReading />

@@ -126,3 +126,35 @@ async def test_rollback_first_turn_restores_empty_and_consecutive(tmp_path):
     async with Session() as s:
         none_left = await rollback_latest_turn(s, sid)  # 已无可回退
     assert none_left.ok is False
+
+
+async def test_rollback_keeps_late_drawn_image_via_imagegen_rebuild(tmp_path):
+    """回归:归属过去轮、但画在该轮快照冻结之后的正典图,回退更晚轮时不应丢(据 ImageGen 自愈)。
+
+    根因:record_generation 只 append 进实时黑板,不写进任何轮的 blackboard_after;回退用旧快照
+    覆盖实时黑板 → 这类「补画」的图被静默丢弃。修复后 rollback 据 ImageGen 重建 image_paths。
+    """
+    Session = await _setup(tmp_path)
+    async with Session() as s:
+        sid = (await create_story(s, title="补图回退")).id
+    # 轮1 room;轮2 cellar 诞生(此刻 cellar 快照 image_paths=[])
+    await _turn(Session, sid, _bb({"room": _scene("房间")}, "room", title="补图回退"))
+    await _turn(Session, sid, _bb({"room": _scene("房间"), "cellar": _scene("地窖")}, "cellar", title="补图回退"))
+    # 给 cellar 出一张正典图,归属轮2(append 进实时黑板;轮2 快照里没有)
+    img = str(tmp_path / "cellar.png")
+    async with Session() as s:
+        await record_generation(s, story_id=sid, scene_slug="cellar", kind="new_scene", final_prompt="",
+                                ref_asset_ids=[], ref_image_paths=[], output_path=img,
+                                origin="director_b_proposal", source_turn=2)
+    # 轮3 推进(reduce 从实时黑板承袭 → 轮3 带图)
+    await _turn(Session, sid, _bb({"room": _scene("房间"), "cellar": _scene("地窖"), "hall": _scene("大厅")}, "hall", title="补图回退"))
+    # 取证:轮2 的 blackboard_after 快照里 cellar 仍是 [](快照确实漏了这张图)
+    async with Session() as s:
+        t2 = (await s.execute(select(Turn).where(Turn.story_id == sid, Turn.turn_index == 2))).scalar_one()
+    assert json.loads(t2.blackboard_after)["scenes"]["cellar"]["image_paths"] == []
+    # 回退轮3 → 还原轮2快照,但据 ImageGen 自愈重建 → cellar 图仍在(修复前会变成 [])
+    async with Session() as s:
+        r = await rollback_latest_turn(s, sid)
+    assert r.ok and r.new_latest_turn == 2
+    bb = await _bb_now(Session, sid)
+    assert bb["scenes"]["cellar"]["image_paths"] == [img]

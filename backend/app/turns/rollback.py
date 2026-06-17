@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Blackboard, Turn
+from app.imaging.pipeline import rebuild_canon_image_paths
 from app.stories.store import empty_blackboard
 from app.turns.draw_proposals import delete_draw_proposals_for_turn
 from app.turns.scene_origins import images_for_scenes, scenes_born_in_turn
@@ -61,6 +62,12 @@ async def rollback_latest_turn(session: AsyncSession, story_id: str) -> Rollback
         title = (cur_bb.get("story_meta") or {}).get("title", "")
         target_bb_str = json.dumps(empty_blackboard(title), ensure_ascii=False)
     target_bb = json.loads(target_bb_str)
+    # 以 ImageGen 为真相重建各场景 image_paths:旧快照可能漏掉「快照冻结后才画、归属本轮之前的正典图」
+    # (回退/重试丢图的根因)。up_to_turn = 回退后的新最新轮;首轮回退(prev=None,空黑板)→ 跳过。
+    await rebuild_canon_image_paths(
+        session, story_id, target_bb, up_to_turn=prev.turn_index if prev else None
+    )
+    target_bb_str = json.dumps(target_bb, ensure_ascii=False)
 
     # 恢复黑板 + 删除最新 Turn。ImageGen 记录与磁盘文件均不触碰 → 图资产保留。
     if bb_row is None:

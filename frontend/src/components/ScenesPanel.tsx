@@ -8,12 +8,14 @@ interface Props {
   blackboard: Blackboard;
   scenesImages: Record<string, string[]>;
   scenesDrafts: Record<string, string[]>; // 手动草稿图(非正式,不进黑板)
+  supersededImages?: string[]; // 被取代的正典图路径:仍在画廊,标「被覆盖」
   pending: PendingImage[];
   onDraw: (slug: string) => void;
 }
 
-export function ScenesPanel({ blackboard, scenesImages, scenesDrafts, pending, onDraw }: Props) {
+export function ScenesPanel({ blackboard, scenesImages, scenesDrafts, supersededImages, pending, onDraw }: Props) {
   const lightbox = useLightbox();
+  const superseded = new Set(supersededImages ?? []);
   const scenes = blackboard.scenes ?? {};
   const slugs = Array.from(
     new Set([...Object.keys(scenes), ...Object.keys(scenesImages), ...Object.keys(scenesDrafts)]),
@@ -53,19 +55,34 @@ export function ScenesPanel({ blackboard, scenesImages, scenesDrafts, pending, o
 
                 {(imgs.length > 0 || drafts.length > 0 || waiting.length > 0) && (
                   <div className="mt-2.5 flex flex-col gap-2">
-                    {imgs.map((p) => (
-                      <div key={p} className="relative">
-                        <img
-                          src={imgUrl(p)}
-                          alt={sc.name ?? slug}
-                          onClick={() => lightbox([{ src: imgUrl(p), alt: sc.name ?? slug }], 0)}
-                          className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line"
-                        />
-                        <span className="absolute left-2 top-2 rounded-[5px] bg-accent/85 px-1.5 py-px font-mono text-[10px] text-white">
-                          正典
-                        </span>
-                      </div>
-                    ))}
+                    {imgs.map((p) =>
+                      superseded.has(p) ? (
+                        // 被覆盖:同场景同轮被更新的图重绘后,旧图退出正典/候选池,留作历史。灰化以与正典、手动草稿三态可辨。
+                        <div key={p} className="relative">
+                          <img
+                            src={imgUrl(p)}
+                            alt={`${sc.name ?? slug}(被覆盖)`}
+                            onClick={() => lightbox([{ src: imgUrl(p), alt: `${sc.name ?? slug} · 被覆盖` }], 0)}
+                            className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line opacity-55 grayscale"
+                          />
+                          <span className="absolute left-2 top-2 rounded-[5px] bg-ink-soft/85 px-1.5 py-px font-mono text-[10px] text-paper">
+                            被覆盖
+                          </span>
+                        </div>
+                      ) : (
+                        <div key={p} className="relative">
+                          <img
+                            src={imgUrl(p)}
+                            alt={sc.name ?? slug}
+                            onClick={() => lightbox([{ src: imgUrl(p), alt: sc.name ?? slug }], 0)}
+                            className="surface-in w-full cursor-zoom-in rounded-[10px] border border-line"
+                          />
+                          <span className="absolute left-2 top-2 rounded-[5px] bg-accent/85 px-1.5 py-px font-mono text-[10px] text-white">
+                            正典
+                          </span>
+                        </div>
+                      ),
+                    )}
                     {waiting.map((w) => (
                       <Placeholder key={w.request_id} pending={w} />
                     ))}

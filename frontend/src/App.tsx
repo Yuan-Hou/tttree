@@ -114,6 +114,7 @@ export function App() {
               blackboard={e.blackboard}
               scenesImages={e.scenesImages}
               scenesDrafts={e.scenesDrafts}
+              supersededImages={e.supersededImages}
               pending={e.pending}
               onDraw={(slug) => e.openDraft(slug, "user_initiated")}
             />

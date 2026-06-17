@@ -82,6 +82,7 @@ export function useStoryEngine() {
   const [turns, setTurns] = useState<TurnView[]>([]);
   const [scenesImages, setScenesImages] = useState<Record<string, string[]>>({});
   const [scenesDrafts, setScenesDrafts] = useState<Record<string, string[]>>({}); // 手动草稿图(非正式)
+  const [supersededImages, setSupersededImages] = useState<string[]>([]); // 被取代的正典图路径:仍在画廊,但标「被覆盖」
   const [proposals, setProposals] = useState<DrawProposal[]>([]);
   const [drafts, setDrafts] = useState<DraftCard[]>([]);
   const [pending, setPending] = useState<PendingImage[]>([]);
@@ -141,6 +142,7 @@ export function useStoryEngine() {
     setBlackboard(snap.blackboard ?? {});
     setScenesImages({ ...scenesImagesOf(snap.blackboard ?? {}), ...(snap.scenes_images ?? {}) });
     setScenesDrafts(snap.scenes_drafts ?? {});
+    setSupersededImages(snap.superseded_images ?? []);
     setTurns(
       (snap.history ?? []).map((t) => ({
         key: `h${t.turn_index}`,
@@ -197,6 +199,7 @@ export function useStoryEngine() {
         setTurns([]);
         setScenesImages({});
         setScenesDrafts({});
+        setSupersededImages([]);
         setProposals([]);
         setDrafts([]);
         setPending([]);
@@ -355,6 +358,7 @@ export function useStoryEngine() {
     setBlackboard(snap.blackboard ?? {});
     setScenesImages({ ...scenesImagesOf(snap.blackboard ?? {}), ...(snap.scenes_images ?? {}) });
     setScenesDrafts(snap.scenes_drafts ?? {});
+    setSupersededImages(snap.superseded_images ?? []);
   }, []);
 
   const confirmDraft = useCallback(
@@ -519,7 +523,7 @@ export function useStoryEngine() {
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   return {
-    stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, proposals, drafts, pending, turnStreaming,
+    stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, supersededImages, proposals, drafts, pending, turnStreaming,
     refreshStories, selectStory, createStory, removeStory, submitTurn,
     openDraft, openDraftForProposal, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, startDraftFromProposal,
     // 工作台 + 时间控制

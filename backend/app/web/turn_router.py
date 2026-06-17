@@ -22,7 +22,7 @@ from app.agents.director_review import run_director_review
 from app.agents.writer import stream_writer
 from app.db.models import Blackboard, ImageGen, Story, Turn
 from app.db.session import async_session
-from app.imaging.pipeline import DRAFT_ORIGIN
+from app.imaging.pipeline import CANON_ORIGIN, DRAFT_ORIGIN
 from app.knowledge.store import get_knowledge
 from app.state.reducer import reduce_turn
 from app.stories.settings_store import get_or_create_settings, resolve_agent_model
@@ -171,6 +171,18 @@ async def get_snapshot(story_id: str) -> dict:
                 .order_by(ImageGen.id)
             )
         ).scalars().all()
+        # 被取代的正典图(superseded):仍留在黑板 image_paths(gallery 可见、可作参考),
+        # 但「场景与画」要把它们标为「被覆盖」而非「正典」。前端按路径成员判定,故只回传路径集合。
+        superseded_rows = (
+            await s.execute(
+                select(ImageGen.output_path).where(
+                    ImageGen.story_id == story_id,
+                    ImageGen.origin == CANON_ORIGIN,
+                    ImageGen.superseded.is_(True),
+                    ImageGen.output_path != "",
+                )
+            )
+        ).scalars().all()
 
     scenes_images = {
         slug: scene.get("image_paths", [])
@@ -185,6 +197,7 @@ async def get_snapshot(story_id: str) -> dict:
         "blackboard": blackboard,
         "scenes_images": scenes_images,
         "scenes_drafts": scenes_drafts,
+        "superseded_images": list(superseded_rows),
         "history": [
             {
                 "turn_index": t.turn_index,

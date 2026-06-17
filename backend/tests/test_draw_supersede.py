@@ -96,6 +96,42 @@ async def test_same_turn_redraw_supersedes_old(tmp_path, monkeypatch):
     await engine.dispose()
 
 
+async def test_snapshot_superseded_paths_query(tmp_path, monkeypatch):
+    """修复二:快照回传的 superseded_images 恰为被取代的正典图路径(标「被覆盖」用)。
+    同轮画三张 → 前两张被覆盖,快照查询应只返回前两张、不含最新有效图。"""
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'sup3.db'}")
+    await create_all(engine)
+    Session = make_session_factory(engine)
+    sid = await _story_with_scene_X(Session)
+
+    outs = iter([f"storage/images/s{i}.png" for i in range(1, 4)])
+
+    async def fake_exec(*, final_prompt, ref_files, scene_slug, **kw):
+        return ExecResult(output_path=next(outs), api_call="generate", ref_files_sent=[])
+
+    monkeypatch.setattr("app.imaging.draw_service.execute_image", fake_exec)
+
+    for _ in range(3):
+        await _draw_canon(Session, sid, source_turn=1)
+
+    # 复刻 snapshot 端点的「被覆盖正典图」查询(turn_router.get_snapshot)
+    async with Session() as s:
+        superseded = (
+            await s.execute(
+                select(ImageGen.output_path).where(
+                    ImageGen.story_id == sid,
+                    ImageGen.origin == "director_b_proposal",
+                    ImageGen.superseded.is_(True),
+                    ImageGen.output_path != "",
+                )
+            )
+        ).scalars().all()
+
+    assert set(superseded) == {"storage/images/s1.png", "storage/images/s2.png"}
+    assert "storage/images/s3.png" not in superseded
+    await engine.dispose()
+
+
 async def test_cross_turn_redraws_independent(tmp_path, monkeypatch):
     """跨轮重绘:不同轮各自轮次内的最新图互不影响 —— 都不被取代、都在候选池。"""
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'sup2.db'}")

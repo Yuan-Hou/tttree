@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     Blackboard,
+    DrawProposal,
     ImageGen,
     Knowledge,
     ReferenceAsset,
@@ -112,21 +113,61 @@ async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
         await session.flush()  # 取到新 id
         ref_id_map[r.id] = nr.id
 
-    # ImageGen(output_path/ref_image_paths 共享磁盘文件;ref_asset_ids 重映射到副本自己的参考图 id)
+    # ImageGen(output_path/ref_image_paths 共享磁盘文件;ref_asset_ids 重映射到副本的参考图 id;
+    # superseded 必须随之复制 —— 否则副本里被取代的旧图会错误地回到「正典」。
+    # 记 旧 ImageGen id → 新 id,供 DrawProposal.done_image_id 重映射。)
+    imagegen_id_map: dict[int, int] = {}
     igs = (
         await session.execute(select(ImageGen).where(ImageGen.story_id == story_id).order_by(ImageGen.id))
     ).scalars().all()
     for ig in igs:
         old_ref_ids = json.loads(ig.ref_asset_ids or "[]")
         new_ref_ids = [ref_id_map.get(x, x) for x in old_ref_ids]
-        session.add(ImageGen(
+        nig = ImageGen(
             story_id=new_id, scene_slug=ig.scene_slug, kind=ig.kind, final_prompt=ig.final_prompt,
             ref_asset_ids=json.dumps(new_ref_ids, ensure_ascii=False), ref_image_paths=ig.ref_image_paths,
-            output_path=ig.output_path, origin=ig.origin, source_turn=ig.source_turn,
+            output_path=ig.output_path, origin=ig.origin, source_turn=ig.source_turn, superseded=ig.superseded,
+        )
+        session.add(nig)
+        await session.flush()  # 取新 id
+        imagegen_id_map[ig.id] = nig.id
+
+    # DrawProposal(绘图待办:绘图台与导演工作台绘图节点的数据源)。此前 fork 漏复制整张表 →
+    # 副本绘图台空白、工作台绘图节点消失。重映射:done_image_id → 新 ImageGen.id;
+    # draft_manifest 里 reference_asset 项的 asset_id → 副本自己的参考图 id(history_image 项是
+    # 共享磁盘路径,不动)。origin_proposal_turn 是 turn_index、随 Turn 原样复制、稳定不变。
+    proposals = (
+        await session.execute(
+            select(DrawProposal).where(DrawProposal.story_id == story_id).order_by(DrawProposal.id)
+        )
+    ).scalars().all()
+    for dp in proposals:
+        session.add(DrawProposal(
+            story_id=new_id, scene_slug=dp.scene_slug, origin_proposal_turn=dp.origin_proposal_turn,
+            kind=dp.kind, status=dp.status, reason=dp.reason,
+            done_image_id=imagegen_id_map.get(dp.done_image_id) if dp.done_image_id is not None else None,
+            draft_messages=dp.draft_messages, draft_prompt=dp.draft_prompt,
+            draft_manifest=_remap_manifest_assets(dp.draft_manifest, ref_id_map),
         ))
 
     await session.commit()
     return await session.get(Story, new_id)
+
+
+def _remap_manifest_assets(manifest_json: str, ref_id_map: dict[int, int]) -> str:
+    """draft_manifest 是 ReferenceRef 列表的 JSON;其中 source=reference_asset 项的 asset_id 指向
+    参考图库,fork 后须重映射到副本自己的参考图 id(source=history_image 项是共享磁盘路径,不动)。
+    解析失败/结构异常时原样返回,绝不让 fork 因脏数据崩。"""
+    try:
+        items = json.loads(manifest_json or "[]")
+    except (ValueError, TypeError):
+        return manifest_json
+    if not isinstance(items, list):
+        return manifest_json
+    for it in items:
+        if isinstance(it, dict) and it.get("source") == "reference_asset" and it.get("asset_id") is not None:
+            it["asset_id"] = ref_id_map.get(it["asset_id"], it["asset_id"])
+    return json.dumps(items, ensure_ascii=False)
 
 
 async def list_stories(session: AsyncSession) -> list[StoryInfo]:
@@ -240,6 +281,7 @@ async def delete_story(
 
     # 删除所有表里属于该 story 的行
     await session.execute(delete(ImageGen).where(ImageGen.story_id == story_id))
+    await session.execute(delete(DrawProposal).where(DrawProposal.story_id == story_id))
     await session.execute(delete(Turn).where(Turn.story_id == story_id))
     await session.execute(delete(ReferenceAsset).where(ReferenceAsset.story_id == story_id))
     await session.execute(delete(Blackboard).where(Blackboard.story_id == story_id))

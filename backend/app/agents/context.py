@@ -40,10 +40,33 @@ def _render_knowledge(knowledge: str) -> str:
     return f"【本故事的世界与角色设定参考(world / character bible)】\n{knowledge}"
 
 
+# 系统管理、agent 既不需要也不被信任的场景字段:出图流程维护 image_paths、reducer 维护 origin_turn。
+# 它们对各叙事 agent 是噪声(image_paths 是文件路径、origin_turn 是审计轮号),且 B 的回显从不被采信
+# (reducer 落库时按 slug 权威加回)。故统一从「发给 LLM 的黑板视图」里剥离,不进任何 agent 的上下文。
+_SYSTEM_SCENE_FIELDS = ("image_paths", "origin_turn")
+
+
+def _blackboard_view(blackboard: Blackboard) -> Blackboard:
+    """发给各 agent 的黑板「视图」:剥离 _SYSTEM_SCENE_FIELDS。只影响渲染给 LLM 的内容,
+    不改持久黑板(原 dict 不被修改);reducer 落库时再把这些系统字段权威加回。"""
+    scenes = blackboard.get("scenes")
+    if not isinstance(scenes, dict):
+        return blackboard
+    clean_scenes = {
+        slug: (
+            {k: v for k, v in sc.items() if k not in _SYSTEM_SCENE_FIELDS}
+            if isinstance(sc, dict)
+            else sc
+        )
+        for slug, sc in scenes.items()
+    }
+    return {**blackboard, "scenes": clean_scenes}
+
+
 def _render_blackboard(blackboard: Blackboard) -> str:
-    """渲染易变区的完整黑板。同一回合内三个 agent 必须收到逐字节相同的黑板,
-    因此本函数是纯函数,不引入任何随机/时间内容。"""
-    body = json.dumps(blackboard, ensure_ascii=False, indent=2)
+    """渲染易变区的黑板视图(已剥离系统管理字段)。同一回合内三个 agent 必须收到逐字节相同的
+    黑板,因此本函数是纯函数,不引入任何随机/时间内容。"""
+    body = json.dumps(_blackboard_view(blackboard), ensure_ascii=False, indent=2)
     return f"【当前黑板】\n{body}"
 
 

@@ -57,6 +57,7 @@ export interface Snapshot {
   scenes_images: Record<string, string[]>; // 正典图(进黑板的提案图)
   scenes_drafts?: Record<string, string[]>; // 用户手动草稿图(origin=user_initiated,不进黑板)
   superseded_images?: string[]; // 被取代的正典图路径:仍在画廊,标「被覆盖」而非「正典」
+  latest_options?: string[]; // 最新一轮的下一步可选项(常驻,刷新/切故事后恢复)
   history: HistoryTurn[];
 }
 

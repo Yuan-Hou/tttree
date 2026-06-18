@@ -165,6 +165,7 @@ export function useStoryEngine() {
     setScenesImages({ ...scenesImagesOf(snap.blackboard ?? {}), ...(snap.scenes_images ?? {}) });
     setScenesDrafts(snap.scenes_drafts ?? {});
     setSupersededImages(snap.superseded_images ?? []);
+    setOptions(snap.latest_options ?? []); // 常驻:刷新/切故事后恢复最新一轮选项
     setTurns(
       (snap.history ?? []).map((t) => ({
         key: `h${t.turn_index}`,

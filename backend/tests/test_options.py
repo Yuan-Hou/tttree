@@ -130,6 +130,29 @@ async def test_options_failure_does_not_block_persistence(turn_env):
     assert t.options_json == ""  # Options 落空,不阻断
 
 
+async def test_snapshot_restores_latest_round_options(turn_env):
+    """常驻可调取:GET /snapshot 回传最新一轮的 options(刷新/切故事后据此恢复选项条)。"""
+    c, Session, state = turn_env
+    async with Session() as s:
+        sid = (await create_story(s, title="T")).id
+    # 无回合时为空,不报错
+    assert (await c.get(f"/story/{sid}/snapshot")).json()["latest_options"] == []
+
+    await c.post(f"/story/{sid}/turn", json={"user_input": "go"})
+    snap = (await c.get(f"/story/{sid}/snapshot")).json()
+    assert snap["latest_options"] == ["往前走", "退回去"]
+
+
+async def test_snapshot_options_empty_when_round_failed(turn_env):
+    """当轮 Options 失败/落空 → latest_options 为空,优雅降级。"""
+    c, Session, state = turn_env
+    state["options_raise"] = True
+    async with Session() as s:
+        sid = (await create_story(s, title="T")).id
+    await c.post(f"/story/{sid}/turn", json={"user_input": "go"})
+    assert (await c.get(f"/story/{sid}/snapshot")).json()["latest_options"] == []
+
+
 async def test_microscope_exposes_options(turn_env):
     c, Session, state = turn_env
     async with Session() as s:

@@ -236,6 +236,16 @@ async def get_snapshot(story_id: str) -> dict:
     scenes_drafts: dict[str, list[str]] = {}
     for ig in draft_rows:
         scenes_drafts.setdefault(ig.scene_slug, []).append(ig.output_path)
+
+    # 最新一轮的「下一步可选项」(常驻可调取):随 Turn.options_json 持久化,刷新/切故事后据此恢复
+    # 输入框上方的选项条。无回合 / Options 当轮落空或失败 / 老数据无该字段 → 空列表(优雅降级)。
+    latest_options: list[str] = []
+    if turns and turns[-1].options_json:
+        try:
+            opts = json.loads(turns[-1].options_json).get("options")
+            latest_options = [str(x) for x in opts] if isinstance(opts, list) else []
+        except (json.JSONDecodeError, AttributeError):
+            latest_options = []
     return {
         "story_id": story_id,
         "title": story.title,
@@ -243,6 +253,7 @@ async def get_snapshot(story_id: str) -> dict:
         "scenes_images": scenes_images,
         "scenes_drafts": scenes_drafts,
         "superseded_images": list(superseded_rows),
+        "latest_options": latest_options,
         "history": [
             {
                 "turn_index": t.turn_index,

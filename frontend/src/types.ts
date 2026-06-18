@@ -109,6 +109,7 @@ export interface SceneMeta {
 export interface ProposalsResp {
   proposals: ProposalRow[];
   scenes: Record<string, SceneMeta>;
+  past_images: PastImage[]; // 过往生成结果全列(绘图台「替代图片」选图来源)
 }
 
 // ── 绘图节点拆分(写稿 / 画图)+ 参考图自由选择 ──

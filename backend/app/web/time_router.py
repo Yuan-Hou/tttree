@@ -149,6 +149,13 @@ async def get_story_proposals(story_id: str, session: AsyncSession = Depends(get
     bb = json.loads(bb_row.json_blob) if bb_row and bb_row.json_blob else {}
     scenes_bb = bb.get("scenes") or {}
 
+    # 过往生成结果全列(供绘图台「替代图片」选图,与 RefPicker 来源二一致,不按轮截断)
+    past = (
+        await session.execute(
+            select(ImageGen).where(ImageGen.story_id == story_id, ImageGen.output_path != "").order_by(ImageGen.id)
+        )
+    ).scalars().all()
+
     slugs = {p.scene_slug for p in props}
     return {
         "proposals": [
@@ -172,6 +179,10 @@ async def get_story_proposals(story_id: str, session: AsyncSession = Depends(get
             }
             for slug in slugs
         },
+        "past_images": [
+            {"imagegen_id": ig.id, "scene_slug": ig.scene_slug, "kind": ig.kind, "output_path": ig.output_path}
+            for ig in past
+        ],
     }
 
 

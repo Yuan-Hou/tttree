@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
+import * as api from "../api";
 import { getStoryProposals, imgUrl } from "../api";
 import type { ProposalRow, ProposalsResp, SceneMeta } from "../types";
 import { useLightbox } from "./Lightbox";
 import { PictureNodeEditor } from "./PictureNodeEditor";
+import { SubstituteDialog } from "./SubstituteDialog";
+import { useToast } from "./Toast";
 import { Eyebrow, Tag } from "./ui";
 
 interface Props {
@@ -19,6 +22,9 @@ interface Props {
 export function DrawDeck(p: Props) {
   const [data, setData] = useState<ProposalsResp | null>(null);
   const [sel, setSel] = useState<{ id: number; scene: string } | null>(null);
+  const [sub, setSub] = useState<{ id: number; scene: string } | null>(null); // 替代图片对话框(按 proposal)
+  const [subBusy, setSubBusy] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     let alive = true;
@@ -64,15 +70,43 @@ export function DrawDeck(p: Props) {
       ) : (
         <div className="mt-3.5 flex flex-col gap-3.5">
           {[...groups.entries()].map(([slug, rows]) => (
-            <SceneGroup key={slug} slug={slug} meta={data!.scenes[slug]} rows={rows} onPick={(id) => setSel({ id, scene: slug })} />
+            <SceneGroup
+              key={slug}
+              slug={slug}
+              meta={data!.scenes[slug]}
+              rows={rows}
+              onPick={(id) => setSel({ id, scene: slug })}
+              onSubstitute={(id) => setSub({ id, scene: slug })}
+            />
           ))}
         </div>
+      )}
+
+      {sub && (
+        <SubstituteDialog
+          pastImages={data?.past_images ?? []}
+          busy={subBusy}
+          onClose={() => setSub(null)}
+          onSubmit={async (pick) => {
+            setSubBusy(true);
+            try {
+              await api.substituteDraw(p.storyId, { proposalId: sub.id, ...pick });
+              setSub(null);
+              p.onReload();
+              toast("已用替代图片作为该提案结果(未花钱)");
+            } catch (e) {
+              toast(`替代图片出错:${String(e)}`);
+            } finally {
+              setSubBusy(false);
+            }
+          }}
+        />
       )}
     </section>
   );
 }
 
-function SceneGroup({ slug, meta, rows, onPick }: { slug: string; meta?: SceneMeta; rows: ProposalRow[]; onPick: (id: number) => void }) {
+function SceneGroup({ slug, meta, rows, onPick, onSubstitute }: { slug: string; meta?: SceneMeta; rows: ProposalRow[]; onPick: (id: number) => void; onSubstitute: (id: number) => void }) {
   return (
     <div className="rounded-xl border border-line bg-paper p-3">
       <div className="flex items-baseline gap-2">
@@ -82,14 +116,14 @@ function SceneGroup({ slug, meta, rows, onPick }: { slug: string; meta?: SceneMe
       </div>
       <div className="mt-2.5 flex flex-col gap-1.5">
         {rows.map((r) => (
-          <TodoRow key={r.id} row={r} meta={meta} onPick={onPick} />
+          <TodoRow key={r.id} row={r} meta={meta} onPick={onPick} onSubstitute={onSubstitute} />
         ))}
       </div>
     </div>
   );
 }
 
-function TodoRow({ row, meta, onPick }: { row: ProposalRow; meta?: SceneMeta; onPick: (id: number) => void }) {
+function TodoRow({ row, meta, onPick, onSubstitute }: { row: ProposalRow; meta?: SceneMeta; onPick: (id: number) => void; onSubstitute: (id: number) => void }) {
   const lightbox = useLightbox();
   const gatedVariant = row.kind === "variant" && !(meta?.has_new_scene ?? false);
   const done = row.status === "done";
@@ -113,6 +147,15 @@ function TodoRow({ row, meta, onPick }: { row: ProposalRow; meta?: SceneMeta; on
         </div>
         {gatedVariant && <div className="mt-0.5 text-[10.5px] text-ink-faint">需先绘制 new_scene 基底</div>}
       </div>
+      {/* 替代图片:不写提示词、不调 gpt-image-2,直接指定/上传一张图作结果 */}
+      <button
+        disabled={gatedVariant}
+        onClick={() => onSubstitute(row.id)}
+        className="shrink-0 rounded-lg border border-line bg-surface px-2.5 py-1 text-[11.5px] text-ink-faint transition hover:border-accent hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-40"
+        title={gatedVariant ? "需先绘制基底" : "替代图片(指定/上传,不花钱)"}
+      >
+        ▣ 替代
+      </button>
       <button
         disabled={gatedVariant}
         onClick={() => onPick(row.id)}

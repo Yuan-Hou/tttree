@@ -15,5 +15,13 @@ class Settings(BaseSettings):
     # 仅供「OpenAI 兼容」provider 用(改指自建网关等),不影响 gpt-image-2 出图客户端。
     openai_base_url: str | None = None
 
+    # 智谱 GLM(Z.ai)——OpenAI 兼容端点,支持 response_format json_object(子步一)。
+    zai_api_key: str | None = None
+    zai_base_url: str = "https://api.z.ai/api/paas/v4"
+
+    # Claude(Anthropic 原生,非 OpenAI 兼容)——适配层见子步二;此处先声明 key 字段,
+    # 让已写进 .env 的 CLAUDE_API_KEY 通过校验(Settings 禁止未声明字段)。
+    claude_api_key: str | None = None
+
 
 settings = Settings()

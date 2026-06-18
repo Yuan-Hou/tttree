@@ -50,6 +50,24 @@ def test_resolve_chat_unknown_falls_back_to_default():
     assert model == model2  # 都回落默认(deepseek),不崩
 
 
+def test_resolve_chat_maps_glm_to_zai(monkeypatch):
+    """子步一:GLM 走 Z.ai 的 OpenAI 兼容端点,与 gpt-5.5 同一条 AsyncOpenAI 路径。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "zai_api_key", "zai-test", raising=False)
+    client, model = resolve_chat("glm-5.1")
+    assert model == "glm-5.1"
+    assert "z.ai" in str(client.base_url)
+
+
+def test_glm_choices_known_and_listed():
+    from app.llm.registry import is_known_model, list_model_choices
+
+    ids = {m["id"] for m in list_model_choices()}
+    assert {"glm-5.1", "glm-5.2"} <= ids          # 暴露给前端下拉
+    assert is_known_model("glm-5.1") and is_known_model("glm-5.2")  # 走同一套设置校验
+
+
 # ── 设置解析:覆盖 vs 默认 ────────────────────────────────────
 async def _setup(tmp_path, name="ms.db"):
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / name}")
@@ -195,9 +213,16 @@ async def test_settings_api_roundtrip(tmp_path, monkeypatch):
         assert g["default_model"] == DEFAULT_MODEL_ID
         assert any(m["id"] == "gpt-5.5" for m in g["models"])  # 可选模型清单暴露给前端
 
+        assert any(m["id"] == "glm-5.1" for m in g["models"])  # GLM 也在清单里
+
         p = await c.put(f"/story/{sid}/settings", json={"overrides": {"writer": "gpt-5.5"}})
         assert p.status_code == 200
         assert p.json()["effective"]["writer"] == "gpt-5.5"
+
+        # 新模型 id 走同一套校验:GLM 覆盖被接受
+        glm = await c.put(f"/story/{sid}/settings", json={"overrides": {"director_a": "glm-5.2"}})
+        assert glm.status_code == 200
+        assert glm.json()["effective"]["director_a"] == "glm-5.2"
 
         bad = await c.put(f"/story/{sid}/settings", json={"default_model": "nope"})
         assert bad.status_code == 422

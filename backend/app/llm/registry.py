@@ -1,7 +1,9 @@
 """多模型接入层(故事内设置 · 子步一)。
 
-只接「OpenAI 兼容」provider —— 都用 AsyncOpenAI 指向各自 base_url。第一批:
-deepseek-v4-pro(DeepSeek base_url)、gpt-5.5(OpenAI base_url)。Anthropic SDK 以后再说。
+只接「OpenAI 兼容」provider —— 都用 AsyncOpenAI 指向各自 base_url。已接:
+deepseek-v4-pro(DeepSeek)、gpt-5.5(OpenAI)、glm-5.1 / glm-5.2(智谱 Z.ai)。
+Z.ai 端点已核实为 OpenAI 兼容且支持 response_format json_object,故与上面同路径,
+无需适配层。Anthropic(Claude)非 OpenAI 兼容,走单独适配路径(子步二)。
 
 设计要点:
 - 可选模型清单是**数据**(MODEL_CHOICES),增改模型只改这份清单,不动调用逻辑。
@@ -44,12 +46,16 @@ class ModelChoice:
 PROVIDERS: dict[str, Provider] = {
     "deepseek": Provider("deepseek", settings.deepseek_base_url, "deepseek_api_key"),
     "openai": Provider("openai", settings.openai_base_url, "openai_api_key"),
+    "zai": Provider("zai", settings.zai_base_url, "zai_api_key"),
 }
 
-# —— 第一批可选模型清单(增改模型只动这里)——
+# —— 可选模型清单(增改模型只动这里)——
+# GLM 的对外 id 即发给 API 的 model 名;若 Z.ai 实际模型名有出入,只改这两行的最后一个参数。
 MODEL_CHOICES: list[ModelChoice] = [
     ModelChoice("deepseek-v4-pro", "DeepSeek V4 Pro", "deepseek", settings.deepseek_model),
     ModelChoice("gpt-5.5", "GPT-5.5", "openai", "gpt-5.5"),
+    ModelChoice("glm-5.1", "GLM-5.1", "zai", "glm-5.1"),
+    ModelChoice("glm-5.2", "GLM-5.2", "zai", "glm-5.2"),
 ]
 
 _BY_ID: dict[str, ModelChoice] = {m.id: m for m in MODEL_CHOICES}

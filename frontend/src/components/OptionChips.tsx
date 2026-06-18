@@ -4,8 +4,8 @@ interface Props {
   onPick: (text: string) => void;
 }
 
-/** 输入框上方的「下一步可选项」(本轮 Options agent 给的建议)。点一条 → 预填到输入框,
- *  用户可再编辑后手动发送;不选也可直接忽略、自己输入。无选项时不渲染。 */
+/** 输入框上方的「下一步可选项」(本轮 Options agent 给的建议)。仅在输入框聚焦时显示;
+ *  点一条 → 预填到输入框,用户可再编辑后手动发送;不选也可直接忽略、自己输入。无选项时不渲染。 */
 export function OptionChips({ options, disabled, onPick }: Props) {
   if (!options.length) return null;
   return (
@@ -16,6 +16,8 @@ export function OptionChips({ options, disabled, onPick }: Props) {
           <button
             key={i}
             disabled={disabled}
+            // 用 mousedown 阻止默认:点选项不抢走输入框焦点(否则 blur 会先把选项条隐藏,click 落空)
+            onMouseDown={(ev) => ev.preventDefault()}
             onClick={() => onPick(opt)}
             title="填入输入框,可再编辑后发送"
             className="rounded-full border border-line-strong bg-paper px-3 py-1 text-[12.5px] text-ink-soft transition hover:border-accent hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-40"

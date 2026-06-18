@@ -36,6 +36,7 @@ export function App() {
   // 选项预填:点输入框上方某条 Options 建议 → 填进 Composer(nonce 保证连点同一条也重填)。
   const [prefill, setPrefill] = useState<{ text: string; key: number } | null>(null);
   const pickOption = useCallback((text: string) => setPrefill({ text, key: Date.now() }), []);
+  const [inputFocused, setInputFocused] = useState(false); // 选项条仅在输入框激活时显示
 
   // 地图随故事推进/新出图自动刷新:轮数、正典图总数、绘图版本、当前场景任一变 → 重取地图
   const canonImageCount = useMemo(
@@ -123,13 +124,14 @@ export function App() {
         {e.curId ? (
           <>
             <ReadingColumn turns={e.turns} onTurnClick={focusTurnOnMap} onDismissFailure={e.dismissFailure} />
-            <OptionChips options={e.options} disabled={e.turnStreaming} onPick={pickOption} />
+            {inputFocused && <OptionChips options={e.options} disabled={e.turnStreaming} onPick={pickOption} />}
             <Composer
               disabled={!e.curId}
               streaming={e.turnStreaming}
               onSubmit={e.submitTurn}
               prefillText={prefill?.text}
               prefillKey={prefill?.key}
+              onFocusChange={setInputFocused}
             />
           </>
         ) : (

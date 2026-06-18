@@ -573,3 +573,74 @@ async def post_substitute(
                 tmp.unlink(missing_ok=True)  # 已复制进库,临时上传文件删掉
 
     return {"type": "image_substituted", **res, "kind": kind, "draw_turn": n, "proposal_id": proposal_id}
+
+
+# ─────────────────────────────────────────────────────────────
+#  手动指定绘图(用户自建提案):让用户为「任意场景 × 任意轮」自己创建一条 DrawProposal。
+#  作者是用户而非导演 B,但落地后与 B 的提案**完全同一条管线**:进绘图台待办、在该轮的导演
+#  工作台显示为绘图分支、写稿/画图节点照常、画完进黑板并在场景地图可见。上下文「就好像在那一轮
+#  绘图」由既有的按 origin_proposal_turn 截断逻辑保证。kind 按场景诞生点权威判定。
+# ─────────────────────────────────────────────────────────────
+
+
+@router.get("/{story_id}/turn/{turn_index}/scenes")
+async def get_turn_scenes(story_id: str, turn_index: int) -> dict:
+    """第 N 轮黑板里**存在且可画**的场景(供手动指定 picker:先定轮 → 列该轮场景)。
+    每个场景附:在该轮画它会是什么 kind(按诞生点)、variant 是否因缺基底而被门控。
+    无诞生点(origin_turn 缺失)的场景不可画,直接略去。"""
+    async with async_session() as s:
+        if await s.get(Story, story_id) is None:
+            raise HTTPException(404, "story not found")
+        bb_n = await _blackboard_after_turn(s, story_id, turn_index)
+        if bb_n is None:
+            raise HTTPException(404, f"turn {turn_index} not found")
+        scenes_bb = bb_n.get("scenes") or {}
+        out: list[dict] = []
+        for slug, sc in scenes_bb.items():
+            if not isinstance(sc, dict):
+                continue
+            kind = kind_for(bb_n, slug, turn_index)
+            if kind is None:
+                continue  # 无诞生点 → 该轮无法判 kind,不可画
+            kinds = await _scene_image_kinds(s, story_id, slug)
+            gated = kind == "variant" and "new_scene" not in kinds
+            out.append({"slug": slug, "name": sc.get("name", slug), "kind": kind, "variant_gated": gated})
+    return {"turn_index": turn_index, "scenes": out}
+
+
+class CreateProposalReq(BaseModel):
+    scene: str = Field(min_length=1)
+    turn: int  # 挂到哪一轮(origin_proposal_turn);上下文据此轮截断
+
+
+@router.post("/{story_id}/proposal")
+async def post_create_proposal(story_id: str, req: CreateProposalReq) -> dict:
+    """手动指定:用户自建一条绘图提案,挂到第 N 轮。返回新建的提案行(随即出现在绘图台/工作台)。
+
+    校验:场景须存在于第 N 轮黑板且有诞生点(否则无法判 kind)。kind 后端权威判定。
+    不做去重:与 B 既有提案、与同场景同轮的其它提案可并存(各是一条独立待办)。
+    reason 记「(手动指定)」以便前端区分作者。
+    """
+    async with async_session() as s:
+        if await s.get(Story, story_id) is None:
+            raise HTTPException(404, "story not found")
+        bb_n = await _blackboard_after_turn(s, story_id, req.turn)
+        if bb_n is None:
+            raise HTTPException(404, f"turn {req.turn} not found")
+        if req.scene not in (bb_n.get("scenes") or {}):
+            raise HTTPException(400, f"scene {req.scene!r} not in turn {req.turn} blackboard")
+        kind = kind_for(bb_n, req.scene, req.turn)
+        if kind is None:
+            raise HTTPException(400, f"scene {req.scene!r} has no origin_turn")
+        prop = DrawProposal(
+            story_id=story_id, scene_slug=req.scene, origin_proposal_turn=req.turn,
+            kind=kind, status="pending", reason="(手动指定)",
+        )
+        s.add(prop)
+        await s.commit()
+        await s.refresh(prop)
+        await touch_story(s, story_id)
+    return {
+        "id": prop.id, "scene_slug": prop.scene_slug, "kind": prop.kind,
+        "status": prop.status, "origin_proposal_turn": prop.origin_proposal_turn, "reason": prop.reason,
+    }

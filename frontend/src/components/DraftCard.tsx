@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { PickedRef } from "../types";
 import type { DraftCard as Card } from "../useStoryEngine";
 import { RefPicker } from "./RefPicker";
+import { SubstituteDialog } from "./SubstituteDialog";
 import { Button, Tag } from "./ui";
 
 interface Props {
@@ -10,12 +12,15 @@ interface Props {
   onConfirm: (key: string) => void;
   onReuse: (key: string) => void;
   onSkip: (key: string) => void;
+  onSubstitute: (key: string, pick: { imagegenId?: number; file?: File }) => Promise<void>;
   onDismiss: (key: string) => void;
 }
 
-/** 人在回路的绘图稿卡:写稿中 → 审阅(可编辑提示词 + 自由选择参考图)→ 确认出图 / 复用 / 跳过。 */
-export function DraftCard({ card, onEditPrompt, onSetRefs, onConfirm, onReuse, onSkip, onDismiss }: Props) {
+/** 人在回路的绘图稿卡:写稿中 → 审阅(可编辑提示词 + 自由选择参考图)→ 确认出图 / 复用 / 替代 / 跳过。 */
+export function DraftCard({ card, onEditPrompt, onSetRefs, onConfirm, onReuse, onSkip, onSubstitute, onDismiss }: Props) {
   const { draft } = card;
+  const [subOpen, setSubOpen] = useState(false);
+  const [subBusy, setSubBusy] = useState(false);
 
   if (card.status === "writing")
     return (
@@ -87,10 +92,27 @@ export function DraftCard({ card, onEditPrompt, onSetRefs, onConfirm, onReuse, o
         <Button variant="primary" onClick={() => onConfirm(card.key)}>
           {card.warn ? "我已知晓,重绘出图" : "确认出图"}
         </Button>
+        <Button variant="ghost" onClick={() => setSubOpen(true)}>▣ 替代图片(不花钱)</Button>
         <Button variant="ghost" onClick={() => onReuse(card.key)}>复用已有图</Button>
         <Button variant="quiet" onClick={() => onSkip(card.key)}>跳过</Button>
         <span className="ml-auto font-mono text-[10px] text-ink-faint">确认即调用 gpt-image-2(花钱)</span>
       </div>
+
+      {subOpen && (
+        <SubstituteDialog
+          pastImages={draft.past_images ?? []}
+          busy={subBusy}
+          onClose={() => setSubOpen(false)}
+          onSubmit={async (pick) => {
+            setSubBusy(true);
+            try {
+              await onSubstitute(card.key, pick);
+            } catch {
+              setSubBusy(false); // 失败留在对话框,可重试;成功则卡片已被移除
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

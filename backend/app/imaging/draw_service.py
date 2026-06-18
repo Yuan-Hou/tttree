@@ -1,8 +1,11 @@
 """绘图人在回路的共享服务:写稿(阶段①)、格式化审阅文本(阶段②素材)、应用用户决策
 (阶段③或 reuse/skip)。m1_cli 的交互层与验收脚本都复用它,保证两入口走同一套逻辑。"""
 
+import shutil
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +17,7 @@ from app.imaging.executor import ImageGenError, ResolvedRefs, execute_image, res
 from app.imaging.pipeline import DRAFT_ORIGIN, is_canon_origin, record_generation
 from app.models.schemas import IllustratorDraft, ReferenceRef
 from app.stories.settings_store import get_or_create_settings, resolve_agent_model
+from app.storage import BACKEND_ROOT, IMAGES_SUBDIR
 
 _HISTORY_TAGS = ["初见", "再访", "其后"]
 
@@ -194,6 +198,42 @@ async def picture_from_refs(
         append_to_blackboard=is_canon_origin(origin),  # 正典进黑板;手动草稿不进
     )
     return {"scene": scene_slug, "output_path": result.output_path, "api_call": result.api_call, "imagegen_id": ig.id}
+
+
+async def substitute_picture(
+    session: AsyncSession,
+    *,
+    story_id: str,
+    scene_slug: str,
+    kind: str,
+    origin: str,
+    source_turn: int | None,
+    src_abs: Path,
+) -> dict:
+    """替代图片(旁路):**不调** gpt-image-2,直接把用户指定的一张图当作本次出图结果落库。
+
+    src_abs:源图绝对路径——可来自「过往生成结果」的库内文件,或用户上传图的临时文件。
+    无论哪种来源,都**复制一份新文件**落到 storage/images/(不引用原文件路径,避免日后原记录被
+    清理时牵连),再走与真实出图完全一致的 record_generation:kind 仍是 new_scene/variant(非 reuse)、
+    按 origin 决定进不进黑板、同 (scene, source_turn) 取代旧正典图。只省掉 API 调用,落库/归属语义不变。
+    """
+    (BACKEND_ROOT / IMAGES_SUBDIR).mkdir(parents=True, exist_ok=True)
+    out_rel = f"{IMAGES_SUBDIR}/{scene_slug}_{uuid.uuid4().hex[:8]}.png"
+    shutil.copy2(src_abs, BACKEND_ROOT / out_rel)  # 复制成新文件,与原图彻底解耦
+    ig = await record_generation(
+        session,
+        story_id=story_id,
+        scene_slug=scene_slug,
+        kind=kind,
+        final_prompt="(替代图片:用户直接指定,未经 gpt-image-2)",
+        ref_asset_ids=[],
+        ref_image_paths=[],
+        output_path=out_rel,
+        origin=origin,
+        source_turn=source_turn,
+        append_to_blackboard=is_canon_origin(origin),  # 正典进黑板;手动草稿不进——比照真实出图
+    )
+    return {"scene": scene_slug, "output_path": out_rel, "api_call": "substitute", "imagegen_id": ig.id}
 
 
 def format_review(bundle: DraftBundle, final_prompt: str | None = None) -> str:

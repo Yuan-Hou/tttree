@@ -478,6 +478,36 @@ export function useStoryEngine() {
     [drafts, blackboard, dropDraft],
   );
 
+  // 替代图片(旁路):不调 gpt-image-2,直接把指定/上传的图当作本次结果落库。
+  // 归属比照真实出图:手动卡(user_initiated)进草稿桶、不进黑板;提案卡进正典桶。
+  const substituteDraft = useCallback(
+    async (key: string, pick: { imagegenId?: number; file?: File }) => {
+      const id = curRef.current;
+      const card = drafts.find((c) => c.key === key);
+      if (!id || !card) return;
+      try {
+        const res = await api.substituteDraw(id, {
+          scene: card.draft.scene,
+          source: card.source,
+          sourceTurn: card.draft.draw_turn ?? undefined,
+          ...pick,
+        });
+        const bucket = card.source === "user_initiated" ? setScenesDrafts : setScenesImages;
+        bucket((prev) => ({
+          ...prev,
+          [res.scene]: [...(prev[res.scene] ?? []).filter((u) => u !== res.output_path), res.output_path],
+        }));
+        silentRefresh();
+        setDrawsVersion((v) => v + 1);
+        dropDraft(key);
+      } catch (e) {
+        showToast(`替代图片出错:${String(e)}`);
+        throw e;
+      }
+    },
+    [drafts, silentRefresh, dropDraft, showToast],
+  );
+
   const startDraftFromProposal = useCallback(
     (p: DrawProposal) => {
       setProposals((ps) => ps.filter((x) => x !== p));
@@ -572,7 +602,7 @@ export function useStoryEngine() {
   return {
     stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, supersededImages, proposals, drafts, pending, turnStreaming, options,
     refreshStories, selectStory, createStory, removeStory, submitTurn,
-    openDraft, openDraftForProposal, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, startDraftFromProposal,
+    openDraft, openDraftForProposal, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, substituteDraft, startDraftFromProposal,
     // 工作台 + 时间控制
     scopeOpen, scopeTurn, setScopeTurn, openScope, closeScope,
     liveStages, liveTurn, retrying, latestTurn, contextsVersion, drawsVersion, liveError, dismissFailure,

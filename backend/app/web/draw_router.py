@@ -17,11 +17,13 @@
 """
 
 import json
+import tempfile
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -35,10 +37,12 @@ from app.imaging.draw_service import (
     apply_decision,
     picture_from_refs,
     prepare_draft,
+    substitute_picture,
     write_illustration_draft,
 )
 from app.imaging.executor import ImageGenError, ResolvedRefs, resolve_references
 from app.models.schemas import ReferenceRef
+from app.storage import BACKEND_ROOT
 from app.stories.store import touch_story
 from app.turns.draw_proposals import get_proposal, kind_for, mark_proposal_done
 from app.web.sse import SSE_HEADERS, sse
@@ -483,3 +487,89 @@ async def post_picture(story_id: str, proposal_id: int, req: PictureReq) -> Stre
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
+
+
+# ─────────────────────────────────────────────────────────────
+#  替代图片(旁路):不调 gpt-image-2,由用户直接指定一张图作为本次出图结果。
+#  选图/上传的动作本身即确认 —— 因为根本没花钱,无需再过确认闸门(真实出图的闸门一律不动)。
+#  归属(origin/kind/scene/取代)完全比照真实出图:走提案入口=正典(进黑板),手动入口=草稿(不进)。
+# ─────────────────────────────────────────────────────────────
+
+
+@router.post("/{story_id}/draw/substitute")
+async def post_substitute(
+    story_id: str,
+    proposal_id: int | None = Form(None),
+    scene: str | None = Form(None),
+    source: str = Form("user_initiated"),
+    source_turn: int | None = Form(None),
+    imagegen_id: int | None = Form(None),  # ①从过往生成结果里选一张(按 ImageGen.id)
+    file: UploadFile | None = File(None),   # ②直接上传一张新图
+) -> dict:
+    """替代图片:把「指定的已有图」或「上传的新图」复制为本次出图结果落库,跳过 execute_image。
+
+    入口二选一:proposal_id(正典提案,origin=director_b_proposal、scene/kind/轮由提案权威取)
+    或 scene(手动绘图,origin=source、kind 按 origin_turn 判)。来源二选一:imagegen_id 或 file。
+    """
+    if (imagegen_id is None) == (file is None):
+        raise HTTPException(400, "需且仅需提供 imagegen_id 或 file 其一")
+
+    async with async_session() as s:
+        if await s.get(Story, story_id) is None:
+            raise HTTPException(404, "story not found")
+
+        # ── 解析归属:提案制(正典)优先于 手动制 ──
+        if proposal_id is not None:
+            prop, n, _bb, variant_gated, _warn = await _resolve_proposal(s, story_id, proposal_id)
+            scene_slug, kind, origin = prop.scene_slug, prop.kind, "director_b_proposal"
+        else:
+            if not scene:
+                raise HTTPException(400, "需提供 proposal_id 或 scene")
+            latest = (
+                await s.execute(select(func.max(Turn.turn_index)).where(Turn.story_id == story_id))
+            ).scalar()
+            n = source_turn if source_turn is not None else latest
+            if n is None:
+                raise HTTPException(400, "故事尚无回合,无法绘图")
+            bb_n = await _blackboard_after_turn(s, story_id, n)
+            if bb_n is None:
+                raise HTTPException(404, f"turn {n} not found")
+            if scene not in (bb_n.get("scenes") or {}):
+                raise HTTPException(400, f"scene {scene!r} not in turn {n} blackboard")
+            scene_slug, origin = scene, source
+            kind = kind_for(bb_n, scene_slug, n)
+            if kind is None:
+                raise HTTPException(400, f"scene {scene_slug!r} has no origin_turn")
+            kinds = await _scene_image_kinds(s, story_id, scene_slug)
+            variant_gated = kind == "variant" and "new_scene" not in kinds
+        if variant_gated:
+            raise HTTPException(409, "variant 需先绘制该场景的 new_scene 基底图")
+
+        # ── 取源图:库内过往结果 或 上传临时文件 ──
+        tmp: Path | None = None
+        if imagegen_id is not None:
+            src = await s.get(ImageGen, imagegen_id)
+            if src is None or src.story_id != story_id or not src.output_path:
+                raise HTTPException(404, "指定的过往生成图不存在")
+            src_abs = BACKEND_ROOT / src.output_path
+            if not src_abs.exists():
+                raise HTTPException(404, "过往生成图文件已丢失")
+        else:
+            suffix = Path(file.filename or "").suffix or ".png"
+            tmp = Path(tempfile.mkstemp(suffix=suffix)[1])
+            tmp.write_bytes(await file.read())
+            src_abs = tmp
+
+        try:
+            res = await substitute_picture(
+                s, story_id=story_id, scene_slug=scene_slug, kind=kind,
+                origin=origin, source_turn=n, src_abs=src_abs,
+            )
+            await touch_story(s, story_id)
+            if proposal_id is not None:  # 提案入口:替代图也算把该提案画完
+                await mark_proposal_done(s, proposal_id, res["imagegen_id"])
+        finally:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)  # 已复制进库,临时上传文件删掉
+
+    return {"type": "image_substituted", **res, "kind": kind, "draw_turn": n, "proposal_id": proposal_id}

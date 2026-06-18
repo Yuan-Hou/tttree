@@ -6,6 +6,7 @@ import { useProposalDraw } from "../useProposalDraw";
 import { useLightbox } from "./Lightbox";
 import { useToast } from "./Toast";
 import { RefPicker } from "./RefPicker";
+import { SubstituteDialog } from "./SubstituteDialog";
 import { Button } from "./ui";
 
 interface Props {
@@ -32,9 +33,10 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onWriti
   const toast = useToast();
   const [prompt, setPrompt] = useState("");
   const [refs, setRefs] = useState<PickedRef[]>([]);
-  const [busy, setBusy] = useState<null | "writing" | "generating">(null);
+  const [busy, setBusy] = useState<null | "writing" | "generating" | "substituting">(null);
   const [error, setError] = useState<string | null>(null);
   const [freshImage, setFreshImage] = useState<string | null>(null);
+  const [subOpen, setSubOpen] = useState(false);
 
   // 写稿数据到位后,初始化提示词与参考图选择(以绘图 Agent 建议为起点)
   useEffect(() => {
@@ -63,6 +65,26 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onWriti
       toast(`绘图写稿出错:${String(e)}`);
     } finally {
       onWriting?.(proposalId, false);
+      setBusy(null);
+    }
+  };
+
+  const substitute = async (pick: { imagegenId?: number; file?: File }) => {
+    setBusy("substituting");
+    setError(null);
+    onGenerating?.(proposalId, true);
+    try {
+      const res = await api.substituteDraw(storyId, { proposalId, ...pick });
+      setFreshImage(res.output_path);
+      setSubOpen(false);
+      onDone();
+      await reload();
+      toast("已用替代图片作为结果(未花钱)");
+    } catch (e) {
+      setError(String(e));
+      toast(`替代图片出错:${String(e)}`);
+    } finally {
+      onGenerating?.(proposalId, false);
       setBusy(null);
     }
   };
@@ -116,6 +138,16 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onWriti
         </div>
       )}
 
+      {/* 替代图片旁路:写稿前/后任意阶段都能打开,不调 gpt-image-2、不花钱 */}
+      {canAct && !data.variant_gated && (
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" disabled={busy !== null} onClick={() => setSubOpen(true)}>
+            ▣ 替代图片(指定/上传 · 不花钱)
+          </Button>
+          <span className="font-mono text-[10px] text-ink-faint">直接定一张图作结果,跳过 gpt-image-2</span>
+        </div>
+      )}
+
       {!written ? (
         <div className="flex flex-col gap-2">
           <p className="rounded-lg border border-dashed border-accent/40 bg-accent-soft/40 px-3 py-2 text-[12px] text-accent-ink">
@@ -162,6 +194,15 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onWriti
       )}
 
       {error && <p className="rounded-lg bg-danger-soft px-3 py-2 text-[12px] text-danger">出错:{error}</p>}
+
+      {subOpen && (
+        <SubstituteDialog
+          pastImages={data.past_images}
+          busy={busy === "substituting"}
+          onClose={() => setSubOpen(false)}
+          onSubmit={substitute}
+        />
+      )}
     </Shell>
   );
 }

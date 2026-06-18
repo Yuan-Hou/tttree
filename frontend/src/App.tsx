@@ -196,6 +196,7 @@ export function App() {
                 onConfirm={e.confirmDraft}
                 onReuse={(k) => e.decideDraft(k, "reuse")}
                 onSkip={(k) => e.decideDraft(k, "skip")}
+                onSubstitute={e.substituteDraft}
                 onDismiss={e.dropDraft}
               />
             </div>

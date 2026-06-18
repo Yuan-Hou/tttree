@@ -10,6 +10,7 @@ interface Props {
   onConfirm: (key: string) => void;
   onReuse: (key: string) => void;
   onSkip: (key: string) => void;
+  onSubstitute: (key: string, pick: { imagegenId?: number; file?: File }) => Promise<void>;
   onDismiss: (key: string) => void;
 }
 
@@ -34,6 +35,7 @@ export function ManualDeck(p: Props) {
             onConfirm={p.onConfirm}
             onReuse={p.onReuse}
             onSkip={p.onSkip}
+            onSubstitute={p.onSubstitute}
             onDismiss={p.onDismiss}
           />
         ))}

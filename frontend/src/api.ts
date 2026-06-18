@@ -85,6 +85,33 @@ export const pictureDraw = (
   onEvent: (e: DrawEvent) => void,
 ) => streamSSE<DrawEvent>(`/story/${id}/draw/proposal/${pid}/picture`, body, onEvent);
 
+/** 替代图片(旁路):不调 gpt-image-2,直接指定一张图作为本次出图结果。
+ *  入口:proposal(正典)给 proposalId;手动给 scene + source(+ sourceTurn)。
+ *  来源二选一:imagegenId(从过往结果选)或 file(上传新图)。 */
+export const substituteDraw = (
+  id: string,
+  pick: {
+    proposalId?: number;
+    scene?: string;
+    source?: string;
+    sourceTurn?: number;
+    imagegenId?: number;
+    file?: File;
+  },
+) => {
+  const fd = new FormData();
+  if (pick.proposalId != null) fd.append("proposal_id", String(pick.proposalId));
+  if (pick.scene) fd.append("scene", pick.scene);
+  if (pick.source) fd.append("source", pick.source);
+  if (pick.sourceTurn != null) fd.append("source_turn", String(pick.sourceTurn));
+  if (pick.imagegenId != null) fd.append("imagegen_id", String(pick.imagegenId));
+  if (pick.file) fd.append("file", pick.file);
+  return fetch(`/story/${id}/draw/substitute`, { method: "POST", body: fd }).then(async (r) => {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json() as Promise<{ output_path: string; imagegen_id: number; scene: string; kind: string }>;
+  });
+};
+
 /** 改写某步的输入记录(直接改 M4.5-B 存的那份;仅最新轮)。 */
 export const saveStepContext = (
   id: string,

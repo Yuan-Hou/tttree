@@ -28,9 +28,12 @@ export function App() {
   }, []);
 
   // 单击对话区 → 让地图聚焦该轮落点场景节点(放大 + 翻到对应图)。nonce 保证连点同一轮也重触发。
+  // 同一信号也用作「对话流当前滚动位置」(视口中央那一轮)→ 手动指定绘图的默认轮次。
   const [focusReq, setFocusReq] = useState<{ turnIndex: number; nonce: number } | null>(null);
+  const [centerTurn, setCenterTurn] = useState<number | null>(null);
   const focusTurnOnMap = useCallback((turnIndex: number) => {
     setFocusReq({ turnIndex, nonce: Date.now() });
+    setCenterTurn(turnIndex);
   }, []);
 
   // 选项预填:点输入框上方某条 Options 建议 → 填进 Composer(nonce 保证连点同一条也重填)。
@@ -206,6 +209,8 @@ export function App() {
               <DrawDeck
                 storyId={e.curId}
                 drawsVersion={e.drawsVersion}
+                latestTurn={e.latestTurn}
+                defaultTurn={centerTurn}
                 onReload={e.reloadScope}
                 onWriting={e.onWriting}
                 onGenerating={e.onGenerating}

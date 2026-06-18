@@ -52,6 +52,22 @@ export const getTurnDraws = (id: string, turnIndex: number) =>
 
 export const getStoryProposals = (id: string) => jget<ProposalsResp>(`/story/${id}/proposals`);
 
+// ── 手动指定绘图(用户自建提案)──
+/** 列出第 N 轮可画的场景(+ kind / variant 门控),供 picker「先定轮 → 列该轮场景」。 */
+export const getTurnScenes = (id: string, turnIndex: number) =>
+  jget<{ turn_index: number; scenes: import("./types").TurnSceneOpt[] }>(
+    `/story/${id}/turn/${turnIndex}/scenes`,
+  );
+
+/** 自建一条绘图提案挂到第 N 轮(随即出现在绘图台待办 / 该轮工作台绘图分支)。 */
+export const createProposal = (id: string, body: { scene: string; turn: number }) =>
+  fetch(`/story/${id}/proposal`, { method: "POST", headers: json, body: JSON.stringify(body) }).then(
+    async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      return r.json() as Promise<{ id: number; scene_slug: string; kind: string; status: string; origin_proposal_turn: number; reason: string }>;
+    },
+  );
+
 // ── 场景地图(静态,第一版):只读组装(节点 / 实线 / 虚线)──
 export const getSceneMap = (id: string) => jget<SceneMap>(`/story/${id}/scene-map`);
 

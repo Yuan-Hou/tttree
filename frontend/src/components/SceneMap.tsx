@@ -5,6 +5,7 @@ import {
   Controls,
   MarkerType,
   ReactFlow,
+  useNodesState,
   type Edge,
   type Node,
   type ReactFlowInstance,
@@ -12,6 +13,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { getSceneMap } from "../api";
 import type { SceneMap as SceneMapData } from "../types";
+import { clearPositions, loadPositions, savePosition } from "../nodeLayout";
 import { SceneNode, type SceneNodeData } from "./SceneNode";
 import { SelfLoopEdge } from "./SelfLoopEdge";
 
@@ -109,7 +111,8 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
     return e ? e.target : null;
   }, [hoverId, base.edges]);
 
-  const nodes = useMemo(
+  // 自动布局 + 实时 data 叠加(高亮/聚焦)。手动拖动的坐标在下方 effect 中覆盖到其上。
+  const computed = useMemo(
     () =>
       base.nodes.map((n) => {
         let d = n.data as SceneNodeData;
@@ -120,6 +123,47 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
     [base.nodes, hoveredTarget, focus],
   );
   const edges = useMemo(() => decorateEdges(base.edges, hoverId), [base.edges, hoverId]);
+
+  // 手动布局:地图是一张随故事整体生长的图,按 `${storyId}.map` 分桶(不分轮)。节点身份 = slug(跨刷新稳定)。
+  const scope = `${storyId}.map`;
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const seededStory = useRef<string>("");
+  const [hasOverrides, setHasOverrides] = useState(false);
+
+  // 同步:地图刷新/高亮变化 → 只更新 data,保留当前(可能已拖动的)坐标;换故事 → 按本故事存档重新落位。
+  useEffect(() => {
+    const reseed = seededStory.current !== storyId;
+    const saved = loadPositions(scope);
+    setNodes((prev) => {
+      const prevPos = new Map(prev.map((n) => [n.id, n.position]));
+      return computed.map((n) => {
+        // 同故事内:沿用上一帧坐标(含刚拖到的);换故事/新场景:用存档,无则默认自动布局。
+        const pos = (!reseed ? prevPos.get(n.id) : undefined) ?? saved[n.id] ?? n.position;
+        return { ...n, position: pos };
+      });
+    });
+    if (reseed) {
+      seededStory.current = storyId;
+      setHasOverrides(Object.keys(saved).length > 0);
+    }
+  }, [computed, storyId, scope, setNodes]);
+
+  // 拖完落盘 + 标记本故事有手动布局(亮出「重置布局」)。
+  const onNodeDragStop = useCallback(
+    (_: unknown, node: Node) => {
+      savePosition(scope, node.id, node.position);
+      setHasOverrides(true);
+    },
+    [scope],
+  );
+
+  // 重置:清掉本故事地图的手动坐标,各场景回到自动布局默认位。
+  const resetLayout = useCallback(() => {
+    clearPositions(scope);
+    const def = new Map(computed.map((n) => [n.id, n.position]));
+    setNodes((prev) => prev.map((n) => ({ ...n, position: def.get(n.id) ?? n.position })));
+    setHasOverrides(false);
+  }, [scope, computed, setNodes]);
 
   const onEdgeClick = useCallback(
     (_: unknown, edge: Edge) => {
@@ -137,7 +181,7 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
         <span>· 悬停高亮 · 双击场景看大图 · 点对话聚焦节点</span>
       </div>
 
-      <div ref={flowWrapRef} className="min-h-0 flex-1">
+      <div ref={flowWrapRef} className="relative min-h-0 flex-1">
         {err ? (
           <div className="flex h-full items-center justify-center text-[13px] text-danger">出错:{err}</div>
         ) : !data ? (
@@ -157,11 +201,13 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
             minZoom={0.25}
             maxZoom={4}
             nodesConnectable={false}
-            nodesDraggable={false}
+            nodeDragThreshold={5}
             elementsSelectable
             zoomOnDoubleClick={false}
             proOptions={{ hideAttribution: true }}
             onInit={(inst) => (rfRef.current = inst)}
+            onNodesChange={onNodesChange}
+            onNodeDragStop={onNodeDragStop}
             onEdgeClick={onEdgeClick}
             onEdgeMouseEnter={(_, edge) => {
               if ((edge.data as { turnIndex?: number } | undefined)?.turnIndex != null) setHoverId(edge.id);
@@ -172,6 +218,16 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
             <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#dfe4ea" />
             <Controls showInteractive={false} className="!shadow-none" />
           </ReactFlow>
+        )}
+        {hasOverrides && data && data.nodes.length > 0 && (
+          <button
+            type="button"
+            onClick={resetLayout}
+            title="清掉本故事地图拖动过的节点位置,回到自动布局"
+            className="absolute bottom-3 right-3 z-10 rounded-full border border-line-strong bg-surface/95 px-3 py-1 font-mono text-[10.5px] text-ink-soft shadow-sm transition hover:bg-sunken"
+          >
+            ↺ 重置布局
+          </button>
         )}
       </div>
     </div>
@@ -281,14 +337,14 @@ function buildGraph(data: SceneMapData | null): { nodes: Node[]; edges: Edge[] }
       id: data.start,
       type: "scene",
       position: startPos,
-      draggable: false,
+      draggable: true,
       data: { variant: "start", name: "起点" } satisfies SceneNodeData,
     },
     ...data.nodes.map((n) => ({
       id: n.slug,
       type: "scene",
       position: pos[n.slug],
-      draggable: false,
+      draggable: true,
       data: {
         variant: "scene",
         name: n.name,
@@ -303,7 +359,7 @@ function buildGraph(data: SceneMapData | null): { nodes: Node[]; edges: Edge[] }
       id: g,
       type: "scene",
       position: pos[g],
-      draggable: false,
+      draggable: true,
       data: { variant: "ghost", name: g } satisfies SceneNodeData,
     })),
   ];

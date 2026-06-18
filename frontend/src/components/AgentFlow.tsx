@@ -1,13 +1,24 @@
-import { useMemo } from "react";
-import { Background, BackgroundVariant, ReactFlow, type Edge, type Node } from "@xyflow/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Background,
+  BackgroundVariant,
+  ReactFlow,
+  useNodesState,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { AgentStep, DrawItem, StepStatus } from "../types";
 import { drawNodeStatuses } from "../drawNodeState";
 import { AgentNode, type AgentNodeData } from "./AgentNode";
+import { clearPositions, loadPositions, savePosition } from "../nodeLayout";
 
 const nodeTypes = { agent: AgentNode };
+const DRAG_HANDLE = ".node-drag-handle"; // 与 AgentNode 把手类名对应:只有抓把手才移动节点
 
 interface Props {
+  storyId: string;
+  turn: number; // 当前显微镜聚焦的轮 —— 手动布局按 (storyId, turn) 分桶
   stages: Record<AgentStep, StepStatus>;
   draws: DrawItem[];
   writingIds: number[]; // 正在写稿/重写的 proposal_id → 写稿节点亮"运行中"
@@ -23,79 +34,157 @@ const MAIN: { step: AgentStep; glyph: string; title: string; subtitle: string; x
   { step: "reducer", glyph: "⤓", title: "落盘", subtitle: "纯逻辑落盘,盖诞生点写入 Turn", x: 766 },
 ];
 
-export function AgentFlow({ stages, draws, writingIds, generatingIds, selectedId, onSelectNode }: Props) {
-  const nodes: Node[] = useMemo(() => {
-    const ns: Node[] = MAIN.map((d) => ({
-      id: d.step,
-      type: "agent",
-      position: { x: d.x, y: 70 },
-      draggable: false,
-      data: {
-        glyph: d.glyph,
-        title: d.title,
-        subtitle: d.subtitle,
-        status: stages[d.step],
-        selected: selectedId === d.step,
-        variant: "main",
-        onSelect: () => onSelectNode(d.step),
-      } satisfies AgentNodeData,
-    }));
+interface BuildArgs {
+  stages: Record<AgentStep, StepStatus>;
+  draws: DrawItem[];
+  writingIds: number[];
+  generatingIds: number[];
+  selectedId: string | null;
+  onSelectNode: (id: string) => void;
+}
 
-    // Options:Writer 后与 Director-B 并行的叶子,放在 B 正下方,不连 reducer。
+/** 自动布局:每个节点的默认坐标 + 实时 data。手动拖动的坐标在外层覆盖到这之上。 */
+function buildNodes(a: BuildArgs): Node[] {
+  const ns: Node[] = MAIN.map((d) => ({
+    id: d.step,
+    type: "agent",
+    position: { x: d.x, y: 70 },
+    draggable: true,
+    dragHandle: DRAG_HANDLE,
+    data: {
+      glyph: d.glyph,
+      title: d.title,
+      subtitle: d.subtitle,
+      status: a.stages[d.step],
+      selected: a.selectedId === d.step,
+      variant: "main",
+      onSelect: () => a.onSelectNode(d.step),
+    } satisfies AgentNodeData,
+  }));
+
+  // Options:Writer 后与 Director-B 并行的叶子,放在 B 正下方,不连 reducer。
+  ns.push({
+    id: "options",
+    type: "agent",
+    position: { x: 524, y: 210 },
+    draggable: true,
+    dragHandle: DRAG_HANDLE,
+    data: {
+      glyph: "⌥",
+      title: "选项",
+      subtitle: "据成稿出 1–3 个下一步可选项",
+      status: a.stages.options,
+      selected: a.selectedId === "options",
+      variant: "main",
+      onSelect: () => a.onSelectNode("options"),
+    } satisfies AgentNodeData,
+  });
+
+  a.draws.forEach((it, i) => {
+    const y = 18 + i * 132;
+    const { draft: draftStatus, img: imgStatus } = drawNodeStatuses(it, a.writingIds, a.generatingIds);
     ns.push({
-      id: "options",
+      id: `draw:${i}:prompt`,
       type: "agent",
-      position: { x: 524, y: 210 },
-      draggable: false,
+      position: { x: 1018, y },
+      draggable: true,
+      dragHandle: DRAG_HANDLE,
       data: {
-        glyph: "⌥",
-        title: "选项",
-        subtitle: "据成稿出 1–3 个下一步可选项",
-        status: stages.options,
-        selected: selectedId === "options",
-        variant: "main",
-        onSelect: () => onSelectNode("options"),
+        glyph: "✎",
+        title: "写稿",
+        subtitle: "绘图 Agent 写提示词",
+        status: draftStatus,
+        selected: a.selectedId === `draw:${i}:prompt`,
+        variant: "draw",
+        badge: it.scene_slug,
+        onSelect: () => a.onSelectNode(`draw:${i}:prompt`),
       } satisfies AgentNodeData,
     });
+    ns.push({
+      id: `draw:${i}:image`,
+      type: "agent",
+      position: { x: 1216, y },
+      draggable: true,
+      dragHandle: DRAG_HANDLE,
+      data: {
+        glyph: "❖",
+        title: "绘图",
+        subtitle: "gpt-image-2 出图",
+        status: imgStatus,
+        selected: a.selectedId === `draw:${i}:image`,
+        variant: "draw",
+        badge: it.kind,
+        onSelect: () => a.onSelectNode(`draw:${i}:image`),
+      } satisfies AgentNodeData,
+    });
+  });
+  return ns;
+}
 
-    draws.forEach((it, i) => {
-      const y = 18 + i * 132;
-      const { draft: draftStatus, img: imgStatus } = drawNodeStatuses(it, writingIds, generatingIds);
-      ns.push({
-        id: `draw:${i}:prompt`,
-        type: "agent",
-        position: { x: 1018, y },
-        draggable: false,
-        data: {
-          glyph: "✎",
-          title: "写稿",
-          subtitle: "绘图 Agent 写提示词",
-          status: draftStatus,
-          selected: selectedId === `draw:${i}:prompt`,
-          variant: "draw",
-          badge: it.scene_slug,
-          onSelect: () => onSelectNode(`draw:${i}:prompt`),
-        } satisfies AgentNodeData,
-      });
-      ns.push({
-        id: `draw:${i}:image`,
-        type: "agent",
-        position: { x: 1216, y },
-        draggable: false,
-        data: {
-          glyph: "❖",
-          title: "绘图",
-          subtitle: "gpt-image-2 出图",
-          status: imgStatus,
-          selected: selectedId === `draw:${i}:image`,
-          variant: "draw",
-          badge: it.kind,
-          onSelect: () => onSelectNode(`draw:${i}:image`),
-        } satisfies AgentNodeData,
+export function AgentFlow({
+  storyId,
+  turn,
+  stages,
+  draws,
+  writingIds,
+  generatingIds,
+  selectedId,
+  onSelectNode,
+}: Props) {
+  const args: BuildArgs = { stages, draws, writingIds, generatingIds, selectedId, onSelectNode };
+  const scope = `${storyId}.${turn}`; // 手动布局按 (故事, 轮) 分桶
+  // 自动布局(默认坐标 + 实时 data),手动坐标在 effect 中覆盖到其上。
+  const computed = useMemo(
+    () => buildNodes(args),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stages, draws, writingIds, generatingIds, selectedId, onSelectNode],
+  );
+
+  // 初始种子:默认坐标叠加本地存的手动坐标(只算一次)→ fitView 首帧就能正确框住,无跳动。
+  const seed = useRef<Node[] | null>(null);
+  if (seed.current === null) {
+    const saved = loadPositions(scope);
+    seed.current = buildNodes(args).map((n) => ({ ...n, position: saved[n.id] ?? n.position }));
+  }
+  const [nodes, setNodes, onNodesChange] = useNodesState(seed.current);
+
+  const seededKey = useRef<string>("");
+  const [hasOverrides, setHasOverrides] = useState(false);
+
+  // 同步:data/选中变化 → 只更新 data 保留当前(可能已拖动的)坐标;换故事/换轮 → 重新按本桶坐标落位。
+  useEffect(() => {
+    const reseed = seededKey.current !== scope;
+    const saved = loadPositions(scope);
+    setNodes((prev) => {
+      const prevPos = new Map(prev.map((n) => [n.id, n.position]));
+      return computed.map((n) => {
+        // 同轮内:沿用上一帧坐标(含刚拖到的位置);换轮/新节点:用本桶存档,无则默认自动布局。
+        const pos = (!reseed ? prevPos.get(n.id) : undefined) ?? saved[n.id] ?? n.position;
+        return { ...n, position: pos };
       });
     });
-    return ns;
-  }, [stages, draws, writingIds, generatingIds, selectedId, onSelectNode]);
+    if (reseed) {
+      seededKey.current = scope;
+      setHasOverrides(Object.keys(saved).length > 0);
+    }
+  }, [computed, scope, setNodes]);
+
+  // 拖完落盘:写本地 + 标记本轮有手动布局(亮出"重置布局")。
+  const onNodeDragStop = useCallback(
+    (_: unknown, node: Node) => {
+      savePosition(scope, node.id, node.position);
+      setHasOverrides(true);
+    },
+    [scope],
+  );
+
+  // 重置:清掉本 (故事, 轮) 的手动坐标,各节点回到自动布局默认位。
+  const resetLayout = useCallback(() => {
+    clearPositions(scope);
+    const def = new Map(computed.map((n) => [n.id, n.position]));
+    setNodes((prev) => prev.map((n) => ({ ...n, position: def.get(n.id) ?? n.position })));
+    setHasOverrides(false);
+  }, [scope, computed, setNodes]);
 
   const edges: Edge[] = useMemo(() => {
     const e: Edge[] = [];
@@ -131,20 +220,34 @@ export function AgentFlow({ stages, draws, writingIds, generatingIds, selectedId
   }, [stages, draws, writingIds, generatingIds]);
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      fitView
-      fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
-      minZoom={0.4}
-      maxZoom={1.4}
-      nodesConnectable={false}
-      onNodeClick={(_, node) => onSelectNode(node.id)}
-      className="bg-paper"
-    >
-      <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#dfe4ea" />
-    </ReactFlow>
+    <div className="relative h-full w-full">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
+        fitView
+        fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+        minZoom={0.4}
+        maxZoom={1.4}
+        nodesConnectable={false}
+        onNodeClick={(_, node) => onSelectNode(node.id)}
+        className="bg-paper"
+      >
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#dfe4ea" />
+      </ReactFlow>
+      {hasOverrides && (
+        <button
+          type="button"
+          onClick={resetLayout}
+          title="清掉本轮拖动过的节点位置,回到自动布局"
+          className="absolute bottom-3 left-3 z-10 rounded-full border border-line-strong bg-surface/95 px-3 py-1 font-mono text-[10.5px] text-ink-soft shadow-sm transition hover:bg-sunken"
+        >
+          ↺ 重置布局
+        </button>
+      )}
+    </div>
   );
 }
 

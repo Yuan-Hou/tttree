@@ -253,6 +253,8 @@ export function Workbench(p: Props) {
           <div className="flex min-h-0 flex-1">
             <div className="relative min-w-0 flex-1">
               <AgentFlow
+                storyId={p.storyId}
+                turn={effTurn}
                 stages={stages}
                 draws={drawItems}
                 writingIds={p.writingIds}

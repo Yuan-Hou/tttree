@@ -76,6 +76,24 @@ const scenesImagesOf = (bb: Blackboard): Record<string, string[]> => {
 let seq = 0;
 const uid = () => `${Date.now()}-${seq++}`;
 
+// 进站自动恢复上次打开的故事(纯前端本地偏好)。
+const LAST_STORY_KEY = "vore.lastStory";
+const readLastStory = (): string | null => {
+  try {
+    return localStorage.getItem(LAST_STORY_KEY);
+  } catch {
+    return null;
+  }
+};
+const writeLastStory = (id: string | null) => {
+  try {
+    if (id) localStorage.setItem(LAST_STORY_KEY, id);
+    else localStorage.removeItem(LAST_STORY_KEY);
+  } catch {
+    /* 隐私模式 / 配额 → 忽略 */
+  }
+};
+
 export function useStoryEngine() {
   const [stories, setStories] = useState<StoryInfo[]>([]);
   const [curId, setCurId] = useState<string | null>(null);
@@ -167,6 +185,7 @@ export function useStoryEngine() {
       inflightRef.current.clear();
       setCurId(id);
       curRef.current = id;
+      writeLastStory(id); // 记住:进站自动恢复
       setProposals([]);
       setDrafts([]);
       setPending([]);
@@ -199,6 +218,7 @@ export function useStoryEngine() {
       if (curRef.current === id) {
         setCurId(null);
         curRef.current = null;
+        writeLastStory(null); // 删的是当前故事 → 别再尝试恢复它
         setTitle("");
         setBlackboard({});
         setTurns([]);
@@ -213,6 +233,17 @@ export function useStoryEngine() {
     },
     [refreshStories],
   );
+
+  // 进站自动恢复上次打开的故事:首批故事列表到位后跑一次,故事仍在则自动 select;
+  // 已不存在(被删/换设备)则优雅留在无选中态。只跑一次,且仅当此刻无选中(不抢已有选择)。
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || stories.length === 0) return;
+    restoredRef.current = true;
+    if (curRef.current) return;
+    const last = readLastStory();
+    if (last && stories.some((s) => s.id === last)) selectStory(last);
+  }, [stories, selectStory]);
 
   // ── 文本线:逐 token 涌现 ──
   const submitTurn = useCallback(

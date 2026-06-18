@@ -8,9 +8,10 @@ interface Props {
   onSelect: (id: string) => void;
   onCreate: (title: string) => void;
   onDelete: (id: string) => void;
+  onCollapse: () => void;
 }
 
-export function Bookshelf({ stories, curId, onSelect, onCreate, onDelete }: Props) {
+export function Bookshelf({ stories, curId, onSelect, onCreate, onDelete, onCollapse }: Props) {
   const [title, setTitle] = useState("");
   const submit = () => {
     const t = title.trim();
@@ -21,8 +22,15 @@ export function Bookshelf({ stories, curId, onSelect, onCreate, onDelete }: Prop
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-5 pb-3 pt-6">
+      <div className="flex items-center px-5 pb-3 pt-6">
         <Eyebrow>书架</Eyebrow>
+        <button
+          onClick={onCollapse}
+          title="收起书架(下次进来记住)"
+          className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-ink-faint transition hover:bg-sunken hover:text-ink-soft"
+        >
+          «
+        </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3">

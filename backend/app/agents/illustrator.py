@@ -13,7 +13,8 @@ from pydantic import ValidationError
 from app.agents.context import Blackboard, Message, build_messages
 from app.agents.loader import load_prompt
 from app.db.models import ReferenceAsset
-from app.llm.registry import resolve_chat
+from app.llm.chat import chat_json
+from app.llm.jsonout import loads_lenient
 from app.models.schemas import IllustratorDraft
 
 VISUAL_STYLE_BIBLE = load_prompt("visual_style_bible.md")
@@ -131,7 +132,6 @@ async def run_illustrator(
     tips: list[str] | None = None,
 ) -> IllustratorDraft:
     # model 由调用方按故事内设置(illustrator)解析后传入;None → registry 回落默认(deepseek)。
-    client, model_name = resolve_chat(model)
     if messages is None:
         messages = build_illustrator_messages(
             history=history,
@@ -142,15 +142,9 @@ async def run_illustrator(
             tips=tips,
         )
 
-    response = await client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
-
-    raw = response.choices[0].message.content or ""
+    raw = await chat_json(model, messages)
     try:
-        data = json.loads(raw)
+        data = loads_lenient(raw)
     except json.JSONDecodeError as exc:
         raise IllustratorError(f"JSON 解析失败: {exc}", raw) from exc
     try:

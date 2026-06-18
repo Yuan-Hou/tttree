@@ -56,6 +56,12 @@ MODEL_CHOICES: list[ModelChoice] = [
     ModelChoice("gpt-5.5", "GPT-5.5", "openai", "gpt-5.5"),
     ModelChoice("glm-5.1", "GLM-5.1", "zai", "glm-5.1"),
     ModelChoice("glm-5.2", "GLM-5.2", "zai", "glm-5.2"),
+    # Claude:Anthropic 原生(非 OpenAI 兼容),走 app/llm/chat.py 的适配路径。对外 id 用 4.6/4.8
+    # 点号写法,API model 名用连字符。无 response_format → JSON 靠 prompt 强约束 + 容错解析。
+    # 缓存代价:Anthropic prompt caching 暂不做,走 Claude 即全价全量重发(已接受,不优化)。
+    ModelChoice("claude-opus-4.6", "Claude Opus 4.6", "anthropic", "claude-opus-4-6"),
+    ModelChoice("claude-opus-4.8", "Claude Opus 4.8", "anthropic", "claude-opus-4-8"),
+    ModelChoice("claude-sonnet-4.6", "Claude Sonnet 4.6", "anthropic", "claude-sonnet-4-6"),
 ]
 
 _BY_ID: dict[str, ModelChoice] = {m.id: m for m in MODEL_CHOICES}
@@ -83,9 +89,36 @@ def resolve_chat(model_id: str | None) -> tuple[AsyncOpenAI, str]:
     """按模型 id 取 (OpenAI 兼容 client, 实际 model 名)。
 
     None / 未知 id → 回落到全局默认(deepseek-v4-pro),即旧行为,保证调用方永不因配置缺失而崩。
+    仅供 OpenAI 兼容 provider;Anthropic 走 resolve_anthropic(由 app/llm/chat.py 按 provider 分流)。
     """
     choice = _BY_ID.get(model_id or "") or _BY_ID[DEFAULT_MODEL_ID]
+    if choice.provider == ANTHROPIC_PROVIDER:
+        raise RuntimeError(f"{choice.id} 是 Anthropic 模型,请走 resolve_anthropic / chat 适配层")
     return _client_for_provider(choice.provider), choice.model
+
+
+ANTHROPIC_PROVIDER = "anthropic"
+
+
+def provider_of(model_id: str | None) -> str:
+    """该模型 id 属于哪个 provider(未知 → 默认模型的 provider)。chat 适配层据此分流。"""
+    return (_BY_ID.get(model_id or "") or _BY_ID[DEFAULT_MODEL_ID]).provider
+
+
+@lru_cache
+def _anthropic_client():
+    """AsyncAnthropic(惰性导入 SDK,未装/未配 key 时只有真用到 Claude 才报错)。"""
+    from anthropic import AsyncAnthropic  # 惰性:不接 Claude 的部署不强依赖该包
+
+    if not settings.claude_api_key:
+        raise RuntimeError("provider 'anthropic' 的 API key(claude_api_key)未配置")
+    return AsyncAnthropic(api_key=settings.claude_api_key)
+
+
+def resolve_anthropic(model_id: str | None):
+    """按模型 id 取 (AsyncAnthropic client, 实际 model 名)。仅供 Anthropic 模型。"""
+    choice = _BY_ID.get(model_id or "") or _BY_ID[DEFAULT_MODEL_ID]
+    return _anthropic_client(), choice.model
 
 
 def is_known_model(model_id: str) -> bool:

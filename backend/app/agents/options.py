@@ -8,7 +8,8 @@
 import json
 
 from app.agents.context import Blackboard, Message, build_messages
-from app.llm.registry import resolve_chat
+from app.llm.chat import chat_json
+from app.llm.jsonout import loads_lenient
 from app.models.schemas import OptionsOutput
 
 
@@ -34,7 +35,6 @@ async def run_options(
     messages 由调用方预构造时直接复用(把真正喂给 LLM 的完整 messages 原样存档);不传则自构造。
     model 由 orchestration 按故事内设置(options)解析后传入;None → registry 回落默认(deepseek)。
     """
-    client, model_name = resolve_chat(model)
     if messages is None:
         messages = build_messages(
             "options",
@@ -45,15 +45,9 @@ async def run_options(
             tips=tips,
         )
 
-    response = await client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
-
-    raw = response.choices[0].message.content or ""
+    raw = await chat_json(model, messages)
     try:
-        data = json.loads(raw)
+        data = loads_lenient(raw)
     except json.JSONDecodeError as exc:
         raise OptionsError(f"JSON 解析失败: {exc}", raw) from exc
     try:

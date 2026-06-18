@@ -2,7 +2,8 @@ import json
 from typing import Any
 
 from app.agents.context import Blackboard, Message, build_messages
-from app.llm.registry import resolve_chat
+from app.llm.chat import chat_json
+from app.llm.jsonout import loads_lenient
 
 
 class DirectorReviewError(Exception):
@@ -27,9 +28,8 @@ async def run_director_review(
     返回解析后的新黑板 dict(权威,后续由 reducer 校验落盘)。本函数只负责取到可解析
     的 JSON,不做语义校验——那是 reducer 的职责。
     """
-    # model 由 orchestration 按故事内设置解析后传入;None → registry 回落默认(deepseek)。
-    client, model_name = resolve_chat(model)
     # 调用方预构造时直接复用(供 M4.5-B 原样存档真正喂给 LLM 的 messages);不传则照常构造。
+    # model 由 orchestration 按故事内设置解析后传入;None → registry 回落默认(deepseek)。
     if messages is None:
         messages = build_messages(
             "director_review",
@@ -40,15 +40,9 @@ async def run_director_review(
             director_a_plan=director_a_plan,
         )
 
-    response = await client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
-
-    raw = response.choices[0].message.content or ""
+    raw = await chat_json(model, messages)
 
     try:
-        return json.loads(raw)
+        return loads_lenient(raw)
     except json.JSONDecodeError as exc:
         raise DirectorReviewError(f"JSON 解析失败: {exc}", raw) from exc

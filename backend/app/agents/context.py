@@ -48,20 +48,26 @@ _SYSTEM_SCENE_FIELDS = ("image_paths", "origin_turn")
 
 
 def _blackboard_view(blackboard: Blackboard) -> Blackboard:
-    """发给各 agent 的黑板「视图」:剥离 _SYSTEM_SCENE_FIELDS。只影响渲染给 LLM 的内容,
-    不改持久黑板(原 dict 不被修改);reducer 落库时再把这些系统字段权威加回。"""
+    """发给各 agent 的黑板「视图」:剥离 _SYSTEM_SCENE_FIELDS,并去掉 story_meta.title。
+    只影响渲染给 LLM 的内容,不改持久黑板(原 dict 不被修改);reducer 落库时再把系统字段权威加回。
+
+    标题只是档案标记、不参与故事 → 不进任何 agent 的黑板视图(story_meta 其余字段照常保留)。
+    这里仍做剥离是为兼容历史库:老黑板里可能还存着 story_meta.title。"""
+    view: Blackboard = dict(blackboard)
+    sm = blackboard.get("story_meta")
+    if isinstance(sm, dict) and "title" in sm:
+        view["story_meta"] = {k: v for k, v in sm.items() if k != "title"}
     scenes = blackboard.get("scenes")
-    if not isinstance(scenes, dict):
-        return blackboard
-    clean_scenes = {
-        slug: (
-            {k: v for k, v in sc.items() if k not in _SYSTEM_SCENE_FIELDS}
-            if isinstance(sc, dict)
-            else sc
-        )
-        for slug, sc in scenes.items()
-    }
-    return {**blackboard, "scenes": clean_scenes}
+    if isinstance(scenes, dict):
+        view["scenes"] = {
+            slug: (
+                {k: v for k, v in sc.items() if k not in _SYSTEM_SCENE_FIELDS}
+                if isinstance(sc, dict)
+                else sc
+            )
+            for slug, sc in scenes.items()
+        }
+    return view
 
 
 def _render_blackboard(blackboard: Blackboard) -> str:

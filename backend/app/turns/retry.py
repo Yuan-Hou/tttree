@@ -35,7 +35,7 @@ from app.agents.director import run_director
 from app.agents.director_review import run_director_review
 from app.agents.options import run_options
 from app.agents.writer import stream_writer
-from app.db.models import Blackboard, Turn
+from app.db.models import Turn
 from app.knowledge.store import get_knowledge
 from app.models.schemas import DirectorOutput
 from app.state.reducer import reduce_turn
@@ -93,9 +93,7 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
     if prev is not None:
         pre_bb_str = prev.blackboard_after
     else:
-        cur = await session.get(Blackboard, story_id)
-        title = (json.loads(cur.json_blob).get("story_meta") or {}).get("title", "") if cur else ""
-        pre_bb_str = json.dumps(empty_blackboard(title), ensure_ascii=False)
+        pre_bb_str = json.dumps(empty_blackboard(), ensure_ascii=False)  # 标题不在黑板,无需保留
     pre_bb = json.loads(pre_bb_str)
     history = await _history_before(session, story_id, n)
     knowledge = await get_knowledge(session, story_id)

@@ -74,7 +74,8 @@ async def test_fork_is_complete_independent_and_shares_files(tmp_path):
     async with Session() as s:
         forked = await fork_story(s, sid)
         nsid = forked.id
-    assert nsid != sid and forked.title == "原档(副本)"
+    # 副本标题含「第几拍」(派生时源故事 2 轮)+「第n个副本」(不重复的最小 n=1)
+    assert nsid != sid and forked.title == "原档(第2拍第1个副本)"
 
     # 完整复制:各类数据都在
     assert await _bb_of(Session, nsid) == await _bb_of(Session, sid)          # 黑板
@@ -188,3 +189,26 @@ async def test_fork_copies_draw_proposals_and_remaps_refs(tmp_path):
     assert man[1]["image_path"] == "storage/images/a1.png"
     # 其余字段原样保留
     assert ndp.status == "done" and ndp.kind == "new_scene" and ndp.reason == "配图理由"
+
+
+async def test_fork_titles_include_beat_and_dedup_min_n(tmp_path):
+    """副本标题含「第几拍」(派生时源轮数)+「第n个副本」(取不重复的最小 n);
+    再 fork 副本时剥掉已有后缀、基名稳定不堆叠。"""
+    Session = await _setup(tmp_path)
+    async with Session() as s:
+        sid = (await create_story(s, title="原档")).id
+        for i in (1, 2, 3):  # 3 轮 → beat=3
+            s.add(Turn(story_id=sid, turn_index=i, narrative=f"n{i}", user_input=f"u{i}"))
+        await s.commit()
+
+    async with Session() as s:
+        f1 = await fork_story(s, sid)
+    async with Session() as s:
+        f2 = await fork_story(s, sid)  # 同源再 fork → n 取下一个最小值
+    assert f1.title == "原档(第3拍第1个副本)"
+    assert f2.title == "原档(第3拍第2个副本)"
+
+    # fork 一个副本(它也含 3 轮):基名剥回「原档」,不堆叠后缀;n 跳过已占用的 1、2 → 3
+    async with Session() as s:
+        f3 = await fork_story(s, f1.id)
+    assert f3.title == "原档(第3拍第3个副本)"

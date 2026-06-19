@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import { useStoryEngine } from "./useStoryEngine";
 import { useLayout, type DragWhich } from "./useLayout";
@@ -153,7 +153,7 @@ export function App() {
           </span>
           {e.curId ? (
             <>
-              <span className="truncate font-serif text-[19px] text-ink">{e.title}</span>
+              <EditableTitle value={e.title} onSave={e.renameStory} />
               <div className="ml-auto flex items-center gap-2 sm:gap-4">
                 <span className="hidden shrink-0 font-mono text-[11px] text-ink-faint sm:inline">
                   {chapters ? `${chapters} 拍已写就` : "尚未落笔"}
@@ -378,6 +378,56 @@ export function App() {
         <SettingsPanel storyId={e.curId} title={e.title} onClose={e.closeSettings} />
       )}
     </div>
+  );
+}
+
+/** 标题:随时可改的档案标记(点一下就地编辑;回车/失焦保存,Esc 取消)。标题不参与故事、不喂 agent。 */
+function EditableTitle({ value, onSave }: { value: string; onSave: (t: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(value); // 外部标题变化(切故事/改名后刷新)→ 非编辑态时同步
+  }, [value, editing]);
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    const t = draft.trim();
+    if (t && t !== value) onSave(t);
+    else setDraft(value);
+  };
+
+  if (editing)
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(ev) => setDraft(ev.target.value)}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") commit();
+          else if (ev.key === "Escape") {
+            setDraft(value);
+            setEditing(false);
+          }
+        }}
+        onBlur={commit}
+        className="min-w-0 max-w-[40ch] flex-1 rounded-md border border-accent/50 bg-paper px-2 py-0.5 font-serif text-[19px] text-ink focus:border-accent focus:outline-none"
+      />
+    );
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      title="点击修改标题"
+      className="group flex min-w-0 items-center gap-1.5"
+    >
+      <span className="truncate font-serif text-[19px] text-ink">{value}</span>
+      <span className="shrink-0 text-[12px] text-ink-faint opacity-0 transition group-hover:opacity-100">✎</span>
+    </button>
   );
 }
 

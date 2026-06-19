@@ -39,8 +39,10 @@ async def test_story_isolation_and_delete_cleanup(tmp_path):
     async with Session() as s:
         bb_a = json.loads((await s.get(Blackboard, aid)).json_blob)
         bb_b = json.loads((await s.get(Blackboard, bid)).json_blob)
-    assert bb_a["story_meta"]["title"] == "故事A"
-    assert bb_b["story_meta"]["title"] == "故事B"
+    # 标题只是档案标记,不进黑板(不参与故事、不喂 agent);只在 Story.title 行上
+    assert "title" not in bb_a["story_meta"] and "title" not in bb_b["story_meta"]
+    async with Session() as s:
+        assert (await s.get(Story, aid)).title == "故事A" and (await s.get(Story, bid)).title == "故事B"
 
     # 参考图每故事独立:A 登记的图在 B 里查不到
     src = _placeholder(tmp_path)
@@ -74,10 +76,11 @@ async def test_story_isolation_and_delete_cleanup(tmp_path):
     assert infos[aid].turn_count == 1
     assert infos[bid].turn_count == 0
 
-    # 重命名 A
+    # 重命名 A:只改 Story.title 行;黑板不被触碰(标题不参与故事)
     async with Session() as s:
         await rename_story(s, aid, "故事A改名")
-        assert json.loads((await s.get(Blackboard, aid)).json_blob)["story_meta"]["title"] == "故事A改名"
+        assert (await s.get(Story, aid)).title == "故事A改名"
+        assert "title" not in json.loads((await s.get(Blackboard, aid)).json_blob)["story_meta"]
 
     # 删除 A:行 + 磁盘文件清理;B 不受影响
     async with Session() as s:

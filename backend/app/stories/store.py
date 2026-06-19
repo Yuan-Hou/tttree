@@ -2,6 +2,7 @@
 参考图(含磁盘文件)。"""
 
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,10 +23,12 @@ from app.db.models import (
 from app.storage import BACKEND_ROOT
 
 
-def empty_blackboard(title: str) -> dict:
-    """新故事的初始空黑板:只有标题,场景/角色/物品/notes 皆空,待首回合建立。"""
+def empty_blackboard() -> dict:
+    """新故事的初始空黑板:场景/角色/物品/notes 皆空,待首回合建立。
+
+    标题不进黑板 —— 它只是档案标记(存在 Story.title 行),不参与故事、不喂给任何 agent。"""
     return {
-        "story_meta": {"title": title, "current_scene": "", "latest_beat": ""},
+        "story_meta": {"current_scene": "", "latest_beat": ""},
         "scenes": {},
         "characters": {},
         "items": {},
@@ -46,11 +49,32 @@ async def create_story(session: AsyncSession, *, title: str) -> Story:
     story_id = uuid.uuid4().hex
     session.add(Story(id=story_id, title=title))
     session.add(
-        Blackboard(story_id=story_id, json_blob=json.dumps(empty_blackboard(title), ensure_ascii=False))
+        Blackboard(story_id=story_id, json_blob=json.dumps(empty_blackboard(), ensure_ascii=False))
     )
     await session.commit()
     story = await session.get(Story, story_id)
     return story
+
+
+# 已有的副本后缀:新格式「(第N拍第M个副本)」或旧格式「(副本)」,可连续多段。再次派生副本时
+# 先剥掉,使 base 稳定、不致后缀层层堆叠。
+_FORK_SUFFIX_RE = re.compile(r"(?:\(副本\)|\(第\d+拍第\d+个副本\))+$")
+
+
+def _strip_fork_suffix(title: str) -> str:
+    """剥掉标题尾部已有的副本后缀,得到用于再次派生的基名;全是后缀则回退原标题。"""
+    return _FORK_SUFFIX_RE.sub("", title).rstrip() or title
+
+
+async def _unique_fork_title(session: AsyncSession, src_title: str, beat: int) -> str:
+    """副本标题:「{基名}(第{beat}拍第{n}个副本)」。beat=派生时源故事的拍数(轮数);
+    n 取使整标题在现有所有故事标题中不重复的最小正整数(简易遍历)。"""
+    base = _strip_fork_suffix(src_title)
+    existing = set((await session.execute(select(Story.title))).scalars().all())
+    n = 1
+    while f"{base}(第{beat}拍第{n}个副本)" in existing:
+        n += 1
+    return f"{base}(第{beat}拍第{n}个副本)"
 
 
 async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
@@ -67,7 +91,12 @@ async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
     if src is None:
         return None
     new_id = uuid.uuid4().hex
-    new_story = Story(id=new_id, title=f"{src.title}(副本)")
+    # 标题尽量不重复:含「第几拍」(源故事当前轮数)+「第n个副本」(取不重复的最小 n)。
+    beat = (
+        await session.execute(select(func.count()).select_from(Turn).where(Turn.story_id == story_id))
+    ).scalar() or 0
+    new_title = await _unique_fork_title(session, src.title, beat)
+    new_story = Story(id=new_id, title=new_title)
     session.add(new_story)
 
     # 黑板(整存复制;image_paths 里的磁盘路径原样指向共享文件)
@@ -194,16 +223,11 @@ async def list_stories(session: AsyncSession) -> list[StoryInfo]:
 
 
 async def rename_story(session: AsyncSession, story_id: str, new_title: str) -> Story | None:
+    """改标题。标题只是档案标记,只改 Story.title;不碰黑板(不参与故事、不喂 agent)。"""
     story = await session.get(Story, story_id)
     if story is None:
         return None
     story.title = new_title
-    # 标题也同步进黑板 story_meta.title(若有黑板)
-    bb_row = await session.get(Blackboard, story_id)
-    if bb_row is not None:
-        bb = json.loads(bb_row.json_blob)
-        bb.setdefault("story_meta", {})["title"] = new_title
-        bb_row.json_blob = json.dumps(bb, ensure_ascii=False)
     await session.commit()
     return story
 

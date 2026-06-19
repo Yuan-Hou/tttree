@@ -201,6 +201,23 @@ export function useStoryEngine() {
     [refreshStories, selectStory],
   );
 
+  // 随时手动改标题:乐观更新当前标题 + 刷新书架(标题只是档案标记,不影响故事/不喂 agent)。
+  const renameStory = useCallback(
+    async (newTitle: string) => {
+      const id = curRef.current;
+      const t = newTitle.trim();
+      if (!id || !t || t === title) return;
+      setTitle(t);
+      try {
+        await api.renameStory(id, t);
+      } catch (err) {
+        showToast(`改名失败:${String(err)}`);
+      }
+      refreshStories();
+    },
+    [title, refreshStories, showToast],
+  );
+
   const removeStory = useCallback(
     async (id: string) => {
       await api.deleteStory(id);
@@ -592,7 +609,7 @@ export function useStoryEngine() {
 
   return {
     stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, supersededImages, proposals, drafts, pending, turnStreaming, options,
-    refreshStories, selectStory, createStory, removeStory, submitTurn,
+    refreshStories, selectStory, createStory, removeStory, renameStory, submitTurn,
     openDraft, openDraftForProposal, generateDraft, editDraftInstruction, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, substituteDraft, startDraftFromProposal,
     // 工作台 + 时间控制
     scopeOpen, scopeTurn, setScopeTurn, openScope, closeScope,

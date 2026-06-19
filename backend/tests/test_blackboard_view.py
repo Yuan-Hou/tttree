@@ -58,6 +58,18 @@ def test_all_agents_embed_identical_stripped_blackboard():
         assert rendered in msgs[-1]["content"]
 
 
+def test_view_strips_story_title_keeps_other_meta():
+    """标题不进任何 agent 的黑板视图;story_meta 其余字段(current_scene 等)照常保留;持久黑板不变。"""
+    bb = {"story_meta": {"title": "海的故事", "current_scene": "lab", "latest_beat": "开端"},
+          "scenes": {}, "characters": {}, "items": {}, "notes": []}
+    view = _blackboard_view(bb)
+    assert "title" not in view["story_meta"]
+    assert view["story_meta"]["current_scene"] == "lab" and view["story_meta"]["latest_beat"] == "开端"
+    assert bb["story_meta"]["title"] == "海的故事"  # 原黑板未被修改
+    rendered = _render_blackboard(bb)
+    assert "海的故事" not in rendered and "lab" in rendered
+
+
 def test_extra_instruction_appended_verbatim_at_tail():
     """用户「附加指令」原样接到易变区最末尾(无任何包装),且排在 tips 之后;空白指令不渲染。"""
     common = dict(history=[], blackboard=_BB, user_action="看一看")

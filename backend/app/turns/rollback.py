@@ -59,8 +59,7 @@ async def rollback_latest_turn(session: AsyncSession, story_id: str) -> Rollback
     if prev is not None:
         target_bb_str = prev.blackboard_after
     else:
-        title = (cur_bb.get("story_meta") or {}).get("title", "")
-        target_bb_str = json.dumps(empty_blackboard(title), ensure_ascii=False)
+        target_bb_str = json.dumps(empty_blackboard(), ensure_ascii=False)  # 标题不在黑板,无需保留
     target_bb = json.loads(target_bb_str)
     # 以 ImageGen 为真相重建各场景 image_paths:旧快照可能漏掉「快照冻结后才画、归属本轮之前的正典图」
     # (回退/重试丢图的根因)。up_to_turn = 回退后的新最新轮;首轮回退(prev=None,空黑板)→ 跳过。

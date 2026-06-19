@@ -18,7 +18,7 @@ from app.llm.deepseek_client import get_client
 from app.models.schemas import DirectorOutput
 from app.stories.store import empty_blackboard
 
-EMPTY = empty_blackboard("诊断故事")
+EMPTY = empty_blackboard()
 con = sqlite3.connect("vore.db")
 _row = con.execute("select json_blob from blackboard where story_id='cli-story'").fetchone()
 con.close()

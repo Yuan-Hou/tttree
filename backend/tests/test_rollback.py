@@ -122,7 +122,8 @@ async def test_rollback_first_turn_restores_empty_and_consecutive(tmp_path):
         r1 = await rollback_latest_turn(s, sid)         # 回退轮1
     assert r1.ok and r1.new_latest_turn is None
     bb = await _bb_now(Session, sid)
-    assert bb["scenes"] == {} and bb["story_meta"]["title"] == "空回退"  # 初始空黑板
+    # 回到初始空黑板;标题不在黑板里(只是档案标记)
+    assert bb["scenes"] == {} and "title" not in bb["story_meta"]
     async with Session() as s:
         none_left = await rollback_latest_turn(s, sid)  # 已无可回退
     assert none_left.ok is False

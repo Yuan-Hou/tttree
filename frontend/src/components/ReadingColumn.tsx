@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TurnView } from "../useStoryEngine";
 import { Tag } from "./ui";
 
@@ -17,14 +17,19 @@ export function ReadingColumn({
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastActive = useRef<number | null>(null);
   const rafPending = useRef(false);
+  const [showTop, setShowTop] = useState(false); // 滚下去一段后浮出「回顶部」
   const streamingText = turns.length ? turns[turns.length - 1] : null;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [turns.length, streamingText?.narrative]);
 
+  const scrollToTop = () => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+
   // 滚动联动:占据「页面中线」的那一轮即当前轮 —— 某轮分界线越过中线就切到对应节点聚焦。
   const onScroll = () => {
+    const cont = scrollRef.current;
+    if (cont) setShowTop(cont.scrollTop > 600); // 同值不触发重渲染,React 自会跳过
     if (!onTurnClick || rafPending.current) return;
     rafPending.current = true;
     requestAnimationFrame(() => {
@@ -49,7 +54,17 @@ export function ReadingColumn({
   };
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+    <div className="relative min-h-0 flex-1">
+      {showTop && (
+        <button
+          onClick={scrollToTop}
+          title="回到对话流顶部"
+          className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line-strong bg-surface/95 px-3 py-1 text-[12px] text-ink-soft shadow-sm backdrop-blur transition hover:border-accent hover:text-accent-ink"
+        >
+          <span className="text-accent">↑</span> 回顶部
+        </button>
+      )}
+      <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[640px] px-10 pb-10 pt-8">
         {turns.length === 0 ? (
           <p className="pt-10 text-center font-serif text-[17px] text-ink-faint">
@@ -73,6 +88,7 @@ export function ReadingColumn({
           </div>
         )}
         <div ref={endRef} />
+      </div>
       </div>
     </div>
   );

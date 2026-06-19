@@ -1,6 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
+import * as api from "./api";
 import { useStoryEngine } from "./useStoryEngine";
 import { useLayout, type DragWhich } from "./useLayout";
+import { usePortrait } from "./usePortrait";
+import { useToast } from "./components/Toast";
+import { loadPositions } from "./nodeLayout";
 import { Bookshelf } from "./components/Bookshelf";
 import { ReadingColumn } from "./components/ReadingColumn";
 import { Composer } from "./components/Composer";
@@ -19,8 +23,36 @@ type RightTab = "now" | "scenes" | "draw";
 export function App() {
   const e = useStoryEngine();
   const layout = useLayout();
+  const portrait = usePortrait();
+  const showToast = useToast();
   const chapters = e.turns.length;
   const [tab, setTab] = useState<RightTab>("now");
+  const [mapOpen, setMapOpen] = useState(true); // 竖屏:地图可折叠
+  const [shelfOverlay, setShelfOverlay] = useState(false); // 竖屏:书架抽屉
+  const [exporting, setExporting] = useState(false);
+
+  // 导出整卷故事为单文件 HTML(只读浏览版)→ 触发下载。
+  const doExport = useCallback(async () => {
+    if (!e.curId || exporting) return;
+    setExporting(true);
+    try {
+      // 带上当前地图节点布局(用户在前端整理好的位置)→ 导出版首开即按此落位。
+      const layout = loadPositions(`${e.curId}.map`);
+      const { blob, filename } = await api.exportStory(e.curId, layout);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast(`导出失败:${String(err)}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [e.curId, exporting, showToast]);
 
   // 点地图实线 → 滚动对话列到对应轮的开头。对话与地图左右并列、始终挂载,直接滚即可。
   const jumpToTurn = useCallback((turnIndex: number) => {
@@ -41,6 +73,20 @@ export function App() {
   const pickOption = useCallback((text: string) => setPrefill({ text, key: Date.now() }), []);
   const [inputFocused, setInputFocused] = useState(false); // 选项条仅在输入框激活时显示
 
+  // 回退(同导演工作台):先抓住「将被回退那一轮」(当前最新正常轮)的输入,回退后预填回输入框,便于改写重来。
+  const doRollbackPrefill = useCallback(async () => {
+    if (e.turnStreaming || e.retrying) return;
+    const rolled = [...e.turns].reverse().find((t) => !t.error);
+    await e.doRollback();
+    if (rolled?.user_input) setPrefill({ text: rolled.user_input, key: Date.now() });
+  }, [e.turns, e.turnStreaming, e.retrying, e.doRollback]);
+
+  // 建副本(同导演工作台):完整克隆当前故事到书架,作主动后悔药。
+  const doForkToast = useCallback(async () => {
+    await e.doFork();
+    showToast("已建副本,见书架");
+  }, [e.doFork, showToast]);
+
   // 地图随故事推进/新出图自动刷新:轮数、正典图总数、绘图版本、当前场景任一变 → 重取地图
   const canonImageCount = useMemo(
     () => Object.values(e.scenesImages).reduce((a, v) => a + v.length, 0),
@@ -55,9 +101,9 @@ export function App() {
   ];
 
   return (
-    <div ref={layout.containerRef} className="flex h-full w-full bg-paper text-ink">
-      {/* ── 左:书架(可折叠,可拖宽)── */}
-      {layout.collapsed ? (
+    <div ref={layout.containerRef} className={`flex h-full w-full bg-paper text-ink ${portrait ? "flex-col" : ""}`}>
+      {/* ── 左:书架(可折叠,可拖宽)。竖屏改为顶部抽屉,这里不内联渲染 ── */}
+      {portrait ? null : layout.collapsed ? (
         <aside
           className="flex shrink-0 flex-col items-center gap-4 border-r border-line bg-surface py-5"
           style={{ width: layout.shelfW }}
@@ -87,19 +133,39 @@ export function App() {
         </>
       )}
 
-      {/* ── 中:阅读列(主角)── */}
-      <main className="flex min-h-0 min-w-0 flex-col" style={{ flexGrow: layout.midSplit, flexBasis: 0 }}>
-        <header className="flex items-baseline gap-3 border-b border-line px-10 py-4">
+      {/* ── 中:阅读列(主角)。竖屏:全宽、填满地图下方剩余高度 ── */}
+      <main
+        className="flex min-h-0 min-w-0 flex-col"
+        style={portrait ? { flex: 1, minHeight: 0, order: 0 } : { flexGrow: layout.midSplit, flexBasis: 0 }}
+      >
+        <header className="flex flex-wrap items-baseline gap-x-3 gap-y-2 border-b border-line px-5 py-3 sm:px-10 sm:py-4">
+          {portrait && (
+            <button
+              onClick={() => setShelfOverlay(true)}
+              title="书架"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line-strong text-ink-soft transition hover:border-accent hover:text-accent-ink"
+            >
+              ☰
+            </button>
+          )}
           <span className="font-serif text-[15px] font-medium tracking-tight text-accent-ink">
             <span className="text-accent">❡</span> vore-tree
           </span>
           {e.curId ? (
             <>
               <span className="truncate font-serif text-[19px] text-ink">{e.title}</span>
-              <div className="ml-auto flex items-center gap-4">
-                <span className="shrink-0 font-mono text-[11px] text-ink-faint">
+              <div className="ml-auto flex items-center gap-2 sm:gap-4">
+                <span className="hidden shrink-0 font-mono text-[11px] text-ink-faint sm:inline">
                   {chapters ? `${chapters} 拍已写就` : "尚未落笔"}
                 </span>
+                <button
+                  onClick={doExport}
+                  disabled={exporting}
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-ink-soft transition hover:border-accent hover:text-accent-ink disabled:opacity-50"
+                  title="把对话流 + 场景地图导出成单文件 HTML(只读浏览版,可分享)"
+                >
+                  <span className="text-accent">⬇</span> {exporting ? "导出中…" : "导出"}
+                </button>
                 <button
                   onClick={e.openScope}
                   className="relative flex shrink-0 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-ink-soft transition hover:border-accent hover:text-accent-ink"
@@ -135,6 +201,9 @@ export function App() {
               prefillText={prefill?.text}
               prefillKey={prefill?.key}
               onFocusChange={setInputFocused}
+              onRollback={doRollbackPrefill}
+              onFork={doForkToast}
+              canRollback={e.latestTurn != null && !e.turnStreaming && !e.retrying}
             />
           </>
         ) : (
@@ -142,10 +211,29 @@ export function App() {
         )}
       </main>
 
-      <Divider which="mid" onStart={layout.startDrag} />
+      {!portrait && <Divider which="mid" onStart={layout.startDrag} />}
 
-      {/* ── 地图:与对话左右并列的常驻列(可拖宽)── */}
-      <section className="flex min-h-0 min-w-0 flex-col bg-paper" style={{ flexGrow: 1 - layout.midSplit, flexBasis: 0 }}>
+      {/* 竖屏:地图折叠条(置于地图与对话之间)。order 介于地图(-2)与对话(0)之间。 */}
+      {portrait && e.curId && (
+        <button
+          onClick={() => setMapOpen((v) => !v)}
+          className="flex shrink-0 items-center justify-center gap-1.5 border-y border-line bg-surface py-1.5 text-[11px] text-ink-soft"
+          style={{ order: -1 }}
+        >
+          <span className="text-accent">{mapOpen ? "▴" : "▾"}</span>
+          {mapOpen ? "收起地图" : "展开地图"}
+        </button>
+      )}
+
+      {/* ── 地图:横屏与对话左右并列(可拖宽);竖屏置于顶部、可折叠 ── */}
+      <section
+        className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-paper transition-[height] duration-300"
+        style={
+          portrait
+            ? { height: mapOpen ? "42vh" : 0, flex: "none", order: -2 }
+            : { flexGrow: 1 - layout.midSplit, flexBasis: 0 }
+        }
+      >
         {e.curId ? (
           <SceneMap storyId={e.curId} onJumpToTurn={jumpToTurn} refreshKey={mapRefreshKey} focusReq={focusReq} />
         ) : (
@@ -155,9 +243,10 @@ export function App() {
         )}
       </section>
 
-      <Divider which="right" onStart={layout.startDrag} />
+      {!portrait && <Divider which="right" onStart={layout.startDrag} />}
 
-      {/* ── 右坞:此刻 / 场景与图 / 绘图台(选项卡,可拖宽)── */}
+      {/* ── 右坞:此刻 / 场景与图 / 绘图台(选项卡,可拖宽)。竖屏隐藏(均为创作/检视类面板)── */}
+      {!portrait && (
       <aside className="flex min-h-0 shrink-0 flex-col border-l border-line bg-surface" style={{ width: layout.rightW }}>
         {e.curId ? (
           <>
@@ -196,6 +285,8 @@ export function App() {
               />
               <ManualDeck
                 drafts={e.drafts}
+                onGenerate={e.generateDraft}
+                onEditInstruction={e.editDraftInstruction}
                 onEditPrompt={e.editDraftPrompt}
                 onSetRefs={e.setDraftRefs}
                 onConfirm={e.confirmDraft}
@@ -226,6 +317,30 @@ export function App() {
           </div>
         )}
       </aside>
+      )}
+
+      {/* 竖屏:书架抽屉(覆盖层)——保留切换故事能力 */}
+      {portrait && shelfOverlay && (
+        <div className="fixed inset-0 z-40 flex" onClick={() => setShelfOverlay(false)}>
+          <div className="absolute inset-0 bg-ink/20" />
+          <aside
+            className="relative flex min-h-0 w-[80%] max-w-[320px] flex-col bg-surface shadow-xl"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <Bookshelf
+              stories={e.stories}
+              curId={e.curId}
+              onSelect={(id) => {
+                e.selectStory(id);
+                setShelfOverlay(false);
+              }}
+              onCreate={e.createStory}
+              onDelete={e.removeStory}
+              onCollapse={() => setShelfOverlay(false)}
+            />
+          </aside>
+        </div>
+      )}
 
       {/* 导演工作台:平时收起不占阅读空间,展开为覆盖层大视图 */}
       {e.scopeOpen && e.curId && (

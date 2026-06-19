@@ -5,6 +5,8 @@ import { Eyebrow } from "./ui";
 
 interface Props {
   drafts: Card[];
+  onGenerate: (key: string) => void;
+  onEditInstruction: (key: string, text: string) => void;
   onEditPrompt: (key: string, prompt: string) => void;
   onSetRefs: (key: string, picked: PickedRef[]) => void;
   onConfirm: (key: string) => void;
@@ -30,6 +32,8 @@ export function ManualDeck(p: Props) {
           <DraftCard
             key={c.key}
             card={c}
+            onGenerate={p.onGenerate}
+            onEditInstruction={p.onEditInstruction}
             onEditPrompt={p.onEditPrompt}
             onSetRefs={p.onSetRefs}
             onConfirm={p.onConfirm}

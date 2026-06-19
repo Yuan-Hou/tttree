@@ -58,6 +58,24 @@ def test_all_agents_embed_identical_stripped_blackboard():
         assert rendered in msgs[-1]["content"]
 
 
+def test_extra_instruction_appended_verbatim_at_tail():
+    """用户「附加指令」原样接到易变区最末尾(无任何包装),且排在 tips 之后;空白指令不渲染。"""
+    common = dict(history=[], blackboard=_BB, user_action="看一看")
+    ill = build_messages(
+        "illustrator", visual_style="vs", reference_catalog="rc",
+        tips=["设定提示甲"], extra_instruction="  逆光、压暗整体  ", **common,
+    )
+    body = ill[-1]["content"]
+    # 末尾就是去空白后的原文,前面只用一个空行分隔 —— 不带【】之类标签
+    assert body.rstrip().endswith("\n\n逆光、压暗整体")
+    assert body.index("设定提示甲") < body.index("逆光、压暗整体")  # tips 之后
+    # 空白/省略 → 不渲染该块
+    blank = build_messages("illustrator", visual_style="vs", reference_catalog="rc", extra_instruction="   ", **common)
+    assert "逆光" not in blank[-1]["content"]
+    none = build_messages("illustrator", visual_style="vs", reference_catalog="rc", **common)
+    assert none[-1]["content"] == blank[-1]["content"]  # 空白与省略等价
+
+
 def test_view_tolerates_missing_or_malformed_scenes():
     assert _blackboard_view({}) == {}  # 无 scenes 键:原样返回,不崩
     assert _blackboard_view({"scenes": "oops"}) == {"scenes": "oops"}  # scenes 非 dict:原样返回

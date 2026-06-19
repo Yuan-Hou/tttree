@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
+import { snapshotToTurns } from "./snapshot";
 import { useToast } from "./components/Toast";
-import type { AgentStep, Blackboard, Draft, DraftRef, DrawProposal, PickedRef, StepStatus, StoryInfo } from "./types";
+import type { AgentStep, Blackboard, Draft, DraftRef, DrawProposal, PickedRef, StepStatus, StoryInfo, TurnView } from "./types";
+
+export type { TurnView };
 
 const STEP_LABEL: Record<AgentStep, string> = {
   director_a: "导演 A",
@@ -38,16 +41,6 @@ const STAGES_AT_SUBMIT: LiveStages = {
   reducer: "pending",
 };
 
-export interface TurnView {
-  key: string;
-  turn_index?: number;
-  user_input: string;
-  narrative: string;
-  beat_title: string;
-  streaming: boolean;
-  error?: string;
-}
-
 export interface DraftCard {
   key: string;
   draft: Draft;
@@ -58,6 +51,7 @@ export interface DraftCard {
   note?: string;
   warn?: boolean; // 重绘 new_scene 警告
   proposalId?: number | null;
+  instruction: string; // 用户对绘图写稿 Agent 的「附加指令」(出提示词前填,可改后重新生成)
 }
 
 export interface PendingImage {
@@ -129,6 +123,9 @@ export function useStoryEngine() {
   curRef.current = curId;
   // 在飞的 SSE 流(出文/出图)。切故事时全部 abort,避免旧故事的流继续写新故事的 state。
   const inflightRef = useRef<Set<AbortController>>(new Set());
+  // 绘图稿最新值的镜像:供稳定回调(generateDraft)按 key 取卡,不必把 drafts 列进依赖。
+  const draftsRef = useRef<DraftCard[]>([]);
+  draftsRef.current = drafts;
 
   // 写稿/出图「运行中」记账(引擎层,跨工作台开关存活)。SSE 的 finally 无论组件是否卸载都会清掉。
   const onWriting = useCallback(
@@ -166,16 +163,7 @@ export function useStoryEngine() {
     setScenesDrafts(snap.scenes_drafts ?? {});
     setSupersededImages(snap.superseded_images ?? []);
     setOptions(snap.latest_options ?? []); // 常驻:刷新/切故事后恢复最新一轮选项
-    setTurns(
-      (snap.history ?? []).map((t) => ({
-        key: `h${t.turn_index}`,
-        turn_index: t.turn_index,
-        user_input: t.user_input,
-        narrative: t.narrative,
-        beat_title: t.beat_title,
-        streaming: false,
-      })),
-    );
+    setTurns(snapshotToTurns(snap));
   }, []);
 
   const selectStory = useCallback(
@@ -332,17 +320,45 @@ export function useStoryEngine() {
     [turnStreaming, refreshStories, showToast, latestTurn],
   );
 
-  // ── 图片线:写稿 → 审阅 → 确认/复用/跳过(独立于文本线,不锁输入)──
-  const openDraft = useCallback(async (scene: string, source: string) => {
-    const id = curRef.current;
-    if (!id) return;
+  // ── 图片线:开卡(填附加指令)→ 生成提示词 → 审阅 → 确认/复用/跳过(独立于文本线,不锁输入)──
+  // 先开一张「待生成」卡(不立即写稿),让用户在出提示词前先填「附加指令」,再点生成。
+  const emptyDraft = (scene: string): Draft => ({ type: "draft_ready", draft_id: "", scene, kind: "", prompt_text: "", refs: [], history: [] });
+
+  const openDraft = useCallback((scene: string, source: string) => {
     const key = uid();
     setDrafts((d) => [
-      { key, draft: { type: "draft_ready", draft_id: "", scene, kind: "", prompt_text: "", refs: [], history: [] }, prompt: "", picked: [], source, status: "writing" },
+      { key, draft: emptyDraft(scene), prompt: "", picked: [], source, status: "review", instruction: "" },
       ...d,
     ]);
+  }, []);
+
+  // 提案制:从绘图台某条待办开稿(kind/截断轮按提案的 origin_turn,后端权威)。
+  const openDraftForProposal = useCallback((proposalId: number, scene: string) => {
+    const key = uid();
+    setDrafts((d) => [
+      { key, draft: emptyDraft(scene), prompt: "", picked: [], source: "director_b_proposal", status: "review", instruction: "", proposalId },
+      ...d,
+    ]);
+  }, []);
+
+  const editDraftInstruction = useCallback((key: string, instruction: string) => {
+    setDrafts((d) => d.map((c) => (c.key === key ? { ...c, instruction } : c)));
+  }, []);
+
+  // (重新)生成提示词:用卡上当前的「附加指令」让绘图写稿 Agent 出/重出稿。每次都是新建上下文。
+  const generateDraft = useCallback(async (key: string) => {
+    const id = curRef.current;
+    if (!id) return;
+    const card = draftsRef.current.find((c) => c.key === key);
+    if (!card) return;
+    const instruction = card.instruction.trim() || undefined;
+    setDrafts((d) => d.map((c) => (c.key === key ? { ...c, status: "writing" } : c)));
     try {
-      const draft = await api.postDraw(id, { scene, source, source_turn: latestTurn }); // 归属到当前最新轮
+      const opts: api.DrawOpts =
+        card.proposalId != null
+          ? { proposal_id: card.proposalId, source: "director_b_proposal", extra_instruction: instruction }
+          : { scene: card.draft.scene, source: card.source, source_turn: latestTurn, extra_instruction: instruction };
+      const draft = await api.postDraw(id, opts);
       if ((draft as { detail?: string }).detail) {
         const detail = (draft as { detail?: string }).detail;
         setDrafts((d) => d.map((c) => (c.key === key ? { ...c, status: "failed", note: detail } : c)));
@@ -357,32 +373,6 @@ export function useStoryEngine() {
       showToast(`绘图写稿出错:${String(e)}`);
     }
   }, [latestTurn, showToast]);
-
-  // 提案制:从绘图台某条待办开稿(kind/截断轮按提案的 origin_turn,后端权威)。
-  const openDraftForProposal = useCallback(async (proposalId: number, scene: string) => {
-    const id = curRef.current;
-    if (!id) return;
-    const key = uid();
-    setDrafts((d) => [
-      { key, draft: { type: "draft_ready", draft_id: "", scene, kind: "", prompt_text: "", refs: [], history: [] }, prompt: "", picked: [], source: "director_b_proposal", status: "writing", proposalId },
-      ...d,
-    ]);
-    try {
-      const draft = await api.postDraw(id, { proposal_id: proposalId, source: "director_b_proposal" });
-      if ((draft as { detail?: string }).detail) {
-        const detail = (draft as { detail?: string }).detail;
-        setDrafts((d) => d.map((c) => (c.key === key ? { ...c, status: "failed", note: detail } : c)));
-        showToast(`绘图写稿出错:${detail}`);
-        return;
-      }
-      setDrafts((d) =>
-        d.map((c) => (c.key === key ? { ...c, draft, prompt: draft.prompt_text, picked: toPicked(draft.refs), status: "review", warn: draft.warn_redraw_base, proposalId } : c)),
-      );
-    } catch (e) {
-      setDrafts((d) => d.map((c) => (c.key === key ? { ...c, status: "failed", note: String(e) } : c)));
-      showToast(`绘图写稿出错:${String(e)}`);
-    }
-  }, [showToast]);
 
   const editDraftPrompt = useCallback((key: string, prompt: string) => {
     setDrafts((d) => d.map((c) => (c.key === key ? { ...c, prompt } : c)));
@@ -603,7 +593,7 @@ export function useStoryEngine() {
   return {
     stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, supersededImages, proposals, drafts, pending, turnStreaming, options,
     refreshStories, selectStory, createStory, removeStory, submitTurn,
-    openDraft, openDraftForProposal, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, substituteDraft, startDraftFromProposal,
+    openDraft, openDraftForProposal, generateDraft, editDraftInstruction, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, substituteDraft, startDraftFromProposal,
     // 工作台 + 时间控制
     scopeOpen, scopeTurn, setScopeTurn, openScope, closeScope,
     liveStages, liveTurn, retrying, latestTurn, contextsVersion, drawsVersion, liveError, dismissFailure,

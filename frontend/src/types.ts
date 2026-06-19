@@ -50,6 +50,18 @@ export interface HistoryTurn {
   beat_title: string;
 }
 
+/** 阅读列视图模型:由 Snapshot.history 映射而来(见 snapshot.ts),
+ *  也用于流式进行中的临时轮(turn_index 未定 / streaming / error)。 */
+export interface TurnView {
+  key: string;
+  turn_index?: number;
+  user_input: string;
+  narrative: string;
+  beat_title: string;
+  streaming: boolean;
+  error?: string;
+}
+
 export interface Snapshot {
   story_id: string;
   title: string;

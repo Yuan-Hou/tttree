@@ -40,6 +40,23 @@ export function savePosition(scope: string, nodeId: string, pos: Pos): void {
   }
 }
 
+/** 批量种入某 scope 的坐标(导出查看器用):仅当该 scope 尚无任何坐标时写入,
+ *  这样导出文件首次打开即按作者整理好的布局落位,而读者之后自己拖动的结果会照常保留、不被覆盖。 */
+export function seedPositions(scope: string, positions: NodePositions): void {
+  try {
+    if (localStorage.getItem(bucketKey(scope))) return; // 已有(读者在导出版里拖过)→ 不覆盖
+    const clean: NodePositions = {};
+    for (const [id, v] of Object.entries(positions)) {
+      if (v && typeof v.x === "number" && typeof v.y === "number") {
+        clean[id] = { x: Math.round(v.x), y: Math.round(v.y) };
+      }
+    }
+    if (Object.keys(clean).length) localStorage.setItem(bucketKey(scope), JSON.stringify(clean));
+  } catch {
+    /* 配额满 / 禁用 → 忽略,退回自动布局 */
+  }
+}
+
 /** 清掉某 scope 的全部手动坐标 → 回到自动布局。 */
 export function clearPositions(scope: string): void {
   try {

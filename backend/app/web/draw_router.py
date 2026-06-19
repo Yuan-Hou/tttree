@@ -74,6 +74,8 @@ class DrawReq(BaseModel):
     source: str = "user_initiated"  # user_initiated | director_b_proposal(写入 ImageGen.origin)
     request: str | None = None  # 绘图请求文本(默认据场景生成)
     source_turn: int | None = None  # 截断到哪一轮的对话+黑板;proposal 时由其 origin 轮覆盖
+    # 用户对绘图写稿 Agent 的「附加指令」:原样接到其输入末尾(不加包装),出提示词前的临时叮嘱。
+    extra_instruction: str | None = None
 
 
 async def _history_through_turn(s: AsyncSession, story_id: str, n: int) -> list[dict]:
@@ -213,6 +215,7 @@ async def post_draw(story_id: str, req: DrawReq) -> dict:
         bundle = await prepare_draft(
             s, story_id=story_id, blackboard=bb_n, scene_slug=scene_slug,
             draw_request=request, history=history, kind=kind, tips=tips,
+            extra_instruction=req.extra_instruction,
         )
         assets = await list_references(s, story_id)
         # 用户手动选参考图的「过往绘制结果」列表:整故事所有 ImageGen(含手动草稿),不按轮截断、不过滤。
@@ -404,6 +407,8 @@ async def get_proposal_draw(story_id: str, proposal_id: int) -> dict:
 class WriteReq(BaseModel):
     messages: list[dict] | None = None  # 编辑过的写稿输入;省略=按截断上下文新建
     request: str | None = None
+    # 用户「附加指令」:仅在新建 messages 时原样接到写稿 Agent 输入末尾(不加包装)。
+    extra_instruction: str | None = None
 
 
 @router.post("/{story_id}/draw/proposal/{proposal_id}/write")
@@ -418,6 +423,7 @@ async def post_write(story_id: str, proposal_id: int, req: WriteReq) -> dict:
         used, draft = await write_illustration_draft(
             s, story_id=story_id, blackboard=bb_n, scene_slug=scene_slug,
             draw_request=request, history=history, kind=kind, messages=req.messages, tips=tips,
+            extra_instruction=req.extra_instruction,
         )
         manifest_dicts = [r.model_dump() for r in draft.reference_manifest]
         prop.draft_messages = json.dumps(used, ensure_ascii=False)

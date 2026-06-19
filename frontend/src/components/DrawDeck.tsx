@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { getStoryProposals, imgUrl } from "../api";
 import type { ProposalRow, ProposalsResp, SceneMeta, TurnSceneOpt } from "../types";
@@ -28,6 +28,12 @@ export function DrawDeck(p: Props) {
   const [subBusy, setSubBusy] = useState(false);
   const [manualOpen, setManualOpen] = useState(false); // 手动指定:为任意场景×任意轮自建提案
   const toast = useToast();
+  const panelRef = useRef<HTMLDivElement>(null); // 出图审阅面板:一出现就滚到它
+
+  // 选中某待办 → 出图审阅面板浮现 → 自动滚到面板(改选另一条也重滚)。
+  useEffect(() => {
+    if (sel) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [sel?.id]);
 
   useEffect(() => {
     let alive = true;
@@ -72,7 +78,7 @@ export function DrawDeck(p: Props) {
 
       {/* 选中的待办 → 画图节点(写稿若缺→出图 + 参考图自由选择) */}
       {sel && (
-        <div className="mt-3.5 overflow-hidden rounded-xl border border-accent/30 bg-surface">
+        <div ref={panelRef} className="mt-3.5 scroll-mt-2 overflow-hidden rounded-xl border border-accent/30 bg-surface">
           <div className="flex items-center justify-between border-b border-line px-3 py-1.5">
             <span className="font-mono text-[11px] text-accent-ink">出图审阅 · {sel.scene}</span>
             <button onClick={() => setSel(null)} className="text-ink-faint hover:text-ink">收起 ✕</button>

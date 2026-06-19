@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PickedRef } from "../types";
 import type { DraftCard as Card } from "../useStoryEngine";
 import { RefPicker } from "./RefPicker";
@@ -7,6 +7,8 @@ import { Button, Tag } from "./ui";
 
 interface Props {
   card: Card;
+  onGenerate: (key: string) => void; // (重新)生成提示词:用卡上的「附加指令」让绘图 Agent 出稿
+  onEditInstruction: (key: string, text: string) => void; // 编辑「附加指令」
   onEditPrompt: (key: string, prompt: string) => void;
   onSetRefs: (key: string, picked: PickedRef[]) => void;
   onConfirm: (key: string) => void;
@@ -16,11 +18,18 @@ interface Props {
   onDismiss: (key: string) => void;
 }
 
-/** 人在回路的绘图稿卡:写稿中 → 审阅(可编辑提示词 + 自由选择参考图)→ 确认出图 / 复用 / 替代 / 跳过。 */
-export function DraftCard({ card, onEditPrompt, onSetRefs, onConfirm, onReuse, onSkip, onSubstitute, onDismiss }: Props) {
+/** 人在回路的绘图稿卡:填附加指令 → 生成提示词 → 审阅(可编辑提示词 + 自由选择参考图)→
+ *  确认出图 / 复用 / 替代 / 跳过。出稿前可填给绘图 Agent 的附加指令,出稿后可改指令重新生成。 */
+export function DraftCard({ card, onGenerate, onEditInstruction, onEditPrompt, onSetRefs, onConfirm, onReuse, onSkip, onSubstitute, onDismiss }: Props) {
   const { draft } = card;
   const [subOpen, setSubOpen] = useState(false);
   const [subBusy, setSubBusy] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null); // 卡一出现就滚到它(手动绘图触发「画这个场景」时)
+
+  // 新卡挂载即滚入视野 —— 用户点「画这个场景」后,绘图窗口直接呈现在眼前。
+  useEffect(() => {
+    rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   if (card.status === "writing")
     return (
@@ -49,13 +58,14 @@ export function DraftCard({ card, onEditPrompt, onSetRefs, onConfirm, onReuse, o
       </div>
     );
 
-  // review
+  // review(含「待生成」子态:尚未出稿 → 只显示附加指令 + 生成按钮)
+  const written = Boolean(card.draft.draft_id);
   return (
-    <div className="rounded-xl border border-accent/30 bg-surface p-3.5 shadow-[0_1px_2px_rgba(28,37,48,0.04)]">
+    <div ref={rootRef} className="scroll-mt-2 rounded-xl border border-accent/30 bg-surface p-3.5 shadow-[0_1px_2px_rgba(28,37,48,0.04)]">
       <div className="flex items-baseline gap-2">
         <span className="font-serif text-[13.5px] text-ink">绘图稿</span>
         <Tag tone="accent">{draft.scene}</Tag>
-        <Tag>{draft.kind}</Tag>
+        {draft.kind && <Tag>{draft.kind}</Tag>}
         {draft.draw_turn != null && <Tag>第{draft.draw_turn}轮</Tag>}
         <button onClick={() => onDismiss(card.key)} className="ml-auto text-ink-faint hover:text-ink">✕</button>
       </div>
@@ -67,6 +77,29 @@ export function DraftCard({ card, onEditPrompt, onSetRefs, onConfirm, onReuse, o
         </div>
       )}
 
+      {/* 附加指令:出稿前可写、出稿后可改;原样接到绘图写稿 Agent 输入末尾,再点(重新)生成 */}
+      <label className="mt-3 block font-mono text-[11px] text-ink-faint">附加指令(可选 · 直接追加到绘图 Agent 输入末尾)</label>
+      <textarea
+        value={card.instruction}
+        onChange={(e) => onEditInstruction(card.key, e.target.value)}
+        rows={2}
+        spellCheck={false}
+        placeholder="例如:强调逆光、压暗整体;别画人物正脸…(留空则不追加)"
+        className="mt-1.5 w-full resize-y rounded-lg border border-line-strong bg-paper px-3 py-2 text-[12.5px] leading-relaxed text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <Button variant={written ? "ghost" : "primary"} onClick={() => onGenerate(card.key)}>
+          {written ? "↻ 重新生成提示词" : "✎ 生成提示词"}
+        </Button>
+        <span className="font-mono text-[10px] text-ink-faint">写稿不出图、不花钱</span>
+      </div>
+
+      {!written ? (
+        <p className="mt-3 rounded-lg border border-dashed border-accent/40 bg-accent-soft/40 px-3 py-2 text-[12px] text-accent-ink">
+          填好附加指令(可留空)后点「生成提示词」,绘图 Agent 据该场景 + 画风 + 参考图库写稿。
+        </p>
+      ) : (
+      <>
       <label className="mt-3 block font-mono text-[11px] text-ink-faint">提示词(可编辑)</label>
       <textarea
         value={card.prompt}
@@ -112,6 +145,8 @@ export function DraftCard({ card, onEditPrompt, onSetRefs, onConfirm, onReuse, o
             }
           }}
         />
+      )}
+      </>
       )}
     </div>
   );

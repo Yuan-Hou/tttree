@@ -33,6 +33,7 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onWriti
   const toast = useToast();
   const [prompt, setPrompt] = useState("");
   const [refs, setRefs] = useState<PickedRef[]>([]);
+  const [instruction, setInstruction] = useState(""); // 给绘图写稿 Agent 的「附加指令」(出稿前填,可改后重新生成)
   const [busy, setBusy] = useState<null | "writing" | "generating" | "substituting">(null);
   const [error, setError] = useState<string | null>(null);
   const [freshImage, setFreshImage] = useState<string | null>(null);
@@ -53,12 +54,13 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onWriti
   const currentImage = freshImage ?? data.done_image_path ?? null;
   const written = Boolean(data.draft_prompt);
 
-  const ensureDraft = async () => {
+  // (重新)写稿:用当前「附加指令」让绘图 Agent 出/重出提示词稿。每次都按截断上下文新建(不复用旧 messages)。
+  const writePrompt = async () => {
     setBusy("writing");
     setError(null);
     onWriting?.(proposalId, true);
     try {
-      await api.writeDraft(storyId, proposalId);
+      await api.writeDraft(storyId, proposalId, undefined, instruction.trim() || undefined);
       await reload();
     } catch (e) {
       setError(String(e));
@@ -151,14 +153,31 @@ export function PictureNodeEditor({ storyId, proposalId, canAct, onDone, onWriti
       {!written ? (
         <div className="flex flex-col gap-2">
           <p className="rounded-lg border border-dashed border-accent/40 bg-accent-soft/40 px-3 py-2 text-[12px] text-accent-ink">
-            还没有提示词稿。画图节点的输入来自写稿节点 —— 先让绘图 Agent 写稿。
+            还没有提示词稿。先(可选)给绘图 Agent 写一句附加指令,再让它写稿。
           </p>
-          <Button variant="ghost" disabled={!canAct || busy !== null} onClick={ensureDraft}>
-            {busy === "writing" ? "写稿中…" : "✎ 让绘图 Agent 写稿"}
-          </Button>
+          {canAct && (
+            <InstrBox
+              value={instruction}
+              onChange={setInstruction}
+              disabled={busy !== null}
+              busy={busy === "writing"}
+              label="✎ 生成提示词"
+              onRun={writePrompt}
+            />
+          )}
         </div>
       ) : (
         <>
+          {canAct && (
+            <InstrBox
+              value={instruction}
+              onChange={setInstruction}
+              disabled={busy !== null}
+              busy={busy === "writing"}
+              label="↻ 重新生成提示词"
+              onRun={writePrompt}
+            />
+          )}
           <Label>提示词(可编辑)</Label>
           <textarea
             value={prompt}
@@ -226,3 +245,28 @@ const Label = ({ children }: { children: React.ReactNode }) => (
   <div className="mt-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-faint">{children}</div>
 );
 const Dim = ({ children }: { children: React.ReactNode }) => <span className="text-[12.5px] text-ink-faint">{children}</span>;
+
+/** 「附加指令」输入 + (重新)生成提示词按钮:指令原样接到绘图写稿 Agent 输入末尾,出稿前填、出稿后可改。 */
+function InstrBox({
+  value, onChange, disabled, busy, label, onRun,
+}: { value: string; onChange: (v: string) => void; disabled: boolean; busy: boolean; label: string; onRun: () => void }) {
+  return (
+    <div className="rounded-lg border border-line bg-paper p-2.5">
+      <Label>附加指令(可选 · 直接追加到绘图 Agent 输入末尾)</Label>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={2}
+        spellCheck={false}
+        placeholder="例如:强调逆光、压暗整体;别画人物正脸…(留空则不追加)"
+        className="mt-1.5 w-full resize-y rounded-lg border border-line-strong bg-surface px-3 py-2 text-[12.5px] leading-relaxed text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <Button variant="primary" disabled={disabled} onClick={onRun}>
+          {busy ? "写稿中…" : label}
+        </Button>
+        <span className="font-mono text-[10px] text-ink-faint">写稿不出图、不花钱</span>
+      </div>
+    </div>
+  );
+}

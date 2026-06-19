@@ -104,11 +104,14 @@ def build_illustrator_messages(
     reference_catalog: str,
     visual_style: str = VISUAL_STYLE_BIBLE,
     tips: list[str] | None = None,
+    extra_instruction: str | None = None,
 ) -> list[Message]:
     """构造喂给绘图 Agent 的完整输入(供「写稿节点」按区块展示+编辑+原样重跑)。
 
     tips:绘图归属轮的导演 A 设定提示(角色外观/场景设定等),由调用方按 source_turn 取出递入,
-    追加到易变区尾部 —— 让绘图写稿也拿到这一拍真正相关的设定底座。"""
+    追加到易变区尾部 —— 让绘图写稿也拿到这一拍真正相关的设定底座。
+    extra_instruction:用户在出图审阅/手动绘图时填的「附加指令」,原样接在易变区最末尾(tips 之后),
+    不加任何包装 —— 让用户能直接对绘图写稿 Agent 追加一句话。"""
     return build_messages(
         "illustrator",
         history=history,
@@ -117,6 +120,7 @@ def build_illustrator_messages(
         visual_style=visual_style,
         reference_catalog=reference_catalog,
         tips=tips,
+        extra_instruction=extra_instruction,
     )
 
 
@@ -130,6 +134,7 @@ async def run_illustrator(
     messages: list[Message] | None = None,
     model: str | None = None,
     tips: list[str] | None = None,
+    extra_instruction: str | None = None,
 ) -> IllustratorDraft:
     # model 由调用方按故事内设置(illustrator)解析后传入;None → registry 回落默认(deepseek)。
     if messages is None:
@@ -140,6 +145,7 @@ async def run_illustrator(
             reference_catalog=reference_catalog,
             visual_style=visual_style,
             tips=tips,
+            extra_instruction=extra_instruction,
         )
 
     raw = await chat_json(model, messages)

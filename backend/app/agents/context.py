@@ -141,6 +141,7 @@ def build_messages(
     visual_style: str | None = None,
     reference_catalog: str | None = None,
     tips: list[str] | None = None,
+    extra_instruction: str | None = None,
 ) -> list[Message]:
     """构造发送给 DeepSeek 的 messages。
 
@@ -186,5 +187,10 @@ def build_messages(
         ]
     if tips_block:
         parts.append(tips_block)
+    # 用户对绘图写稿 Agent 的「附加指令」:直接原样接在易变区**最末尾**(tips 之后),不加任何
+    # 标签/包装 ——「不加其他东西」。仍在 user 消息内,不动 system+history 前缀 → 不击穿缓存。
+    extra = (extra_instruction or "").strip()
+    if extra:
+        parts.append(extra)
     messages.append({"role": "user", "content": "\n\n".join(parts)})
     return messages

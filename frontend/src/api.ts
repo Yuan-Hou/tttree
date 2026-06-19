@@ -24,8 +24,10 @@ async function jget<T>(url: string): Promise<T> {
   return r.json();
 }
 
-/** 生成图/参考图按相对路径(storage/...)存,后端挂在 /storage;前缀一个 / 即可。 */
-export const imgUrl = (rel: string): string => "/" + rel.replace(/^\/+/, "");
+/** 生成图/参考图按相对路径(storage/...)存,后端挂在 /storage;前缀一个 / 即可。
+ *  导出查看器里图片已内联成 data: URI(无后端可取)→ 原样放行。 */
+export const imgUrl = (rel: string): string =>
+  rel.startsWith("data:") ? rel : "/" + rel.replace(/^\/+/, "");
 
 export const listStories = () => jget<StoryInfo[]>("/stories");
 
@@ -42,6 +44,25 @@ export const renameStory = (id: string, title: string) =>
   );
 
 export const getSnapshot = (id: string) => jget<Snapshot>(`/story/${id}/snapshot`);
+
+/** 导出整卷故事为单文件 HTML(只读浏览版)。layout = 当前地图节点布局(随导出带上)。
+ *  返回 blob + 后端给的文件名,供前端触发下载。 */
+export const exportStory = async (
+  id: string,
+  layout?: Record<string, { x: number; y: number }>,
+): Promise<{ blob: Blob; filename: string }> => {
+  const r = await fetch(`/story/${id}/export`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ layout: layout ?? {} }),
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  const blob = await r.blob();
+  const cd = r.headers.get("Content-Disposition") || "";
+  const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  const filename = m ? decodeURIComponent(m[1]) : "story.html";
+  return { blob, filename };
+};
 
 // ── 时间控制 + 节点上下文(M5-B)──
 export const getTurnContexts = (id: string, turnIndex: number) =>
@@ -75,12 +96,13 @@ export const getSceneMap = (id: string) => jget<SceneMap>(`/story/${id}/scene-ma
 export const getProposalDraw = (id: string, pid: number) =>
   jget<ProposalDraw>(`/story/${id}/draw/proposal/${pid}`);
 
-/** 写稿(重)跑:输出提示词文本。messages 给定=用编辑后的输入重写。 */
-export const writeDraft = (id: string, pid: number, messages?: ContextMessage[]) =>
+/** 写稿(重)跑:输出提示词文本。messages 给定=用编辑后的输入重写;
+ *  instruction = 用户「附加指令」,仅在按截断上下文新建(无 messages)时原样接到 Agent 输入末尾。 */
+export const writeDraft = (id: string, pid: number, messages?: ContextMessage[], instruction?: string) =>
   fetch(`/story/${id}/draw/proposal/${pid}/write`, {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ messages: messages ?? null }),
+    body: JSON.stringify({ messages: messages ?? null, extra_instruction: instruction ?? null }),
   }).then(async (r) => {
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     return r.json() as Promise<{ draft_prompt: string; draft_manifest: import("./types").DraftRef[]; draft_messages: ContextMessage[]; warn_redraw_base: boolean }>;
@@ -221,6 +243,7 @@ export interface DrawOpts {
   scene?: string; // 临时制:直接画某场景
   source?: string;
   source_turn?: number | null; // 截断/归属轮
+  extra_instruction?: string; // 用户「附加指令」,原样接到绘图写稿 Agent 输入末尾
 }
 export const postDraw = (id: string, opts: DrawOpts) =>
   fetch(`/story/${id}/draw`, { method: "POST", headers: json, body: JSON.stringify(opts) }).then(

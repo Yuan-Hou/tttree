@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.db.session import create_all, engine
 from app.storage import STORAGE_ROOT, ensure_dirs
 from app.web.draw_router import router as draw_router
+from app.web.export_router import router as export_router
 from app.web.knowledge_router import router as knowledge_router
 from app.web.references_router import router as references_router
 from app.web.scene_map_router import router as scene_map_router
@@ -38,6 +39,7 @@ app.include_router(time_router)
 app.include_router(settings_router)
 app.include_router(knowledge_router)
 app.include_router(scene_map_router)
+app.include_router(export_router)
 
 # 生成图/参考图按相对路径(storage/...)存,这里挂成静态目录供浏览器取缩略图。
 app.mount("/storage", StaticFiles(directory=str(STORAGE_ROOT), check_dir=False), name="storage")

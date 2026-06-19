@@ -299,16 +299,19 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
   const renderNodes = useMemo(
     () =>
       nodes.map((n) => {
+        // 聚焦的相关节点置于顶层,不被连线/其他节点遮挡。
+        const z = groupFocus?.pages.has(n.id) ? { zIndex: 1000 } : undefined;
         const g = gridPos.get(n.id);
         if (g) {
-          return { ...n, position: g, draggable: false, style: { ...n.style, transition: `transform ${ENTER_MS}ms ${EASE}` } };
+          return { ...n, ...z, position: g, draggable: false, style: { ...n.style, transition: `transform ${ENTER_MS}ms ${EASE}` } };
         }
         if (restoring.has(n.id)) {
-          return { ...n, style: { ...n.style, transition: `transform ${RESTORE_MS}ms ${EASE}` } };
+          return { ...n, ...z, style: { ...n.style, transition: `transform ${RESTORE_MS}ms ${EASE}` } };
         }
-        return (n.style as { transition?: string } | undefined)?.transition ? { ...n, style: { ...n.style, transition: undefined } } : n;
+        const cleared = (n.style as { transition?: string } | undefined)?.transition ? { ...n, style: { ...n.style, transition: undefined } } : n;
+        return z ? { ...cleared, ...z } : cleared;
       }),
-    [nodes, gridPos, restoring],
+    [nodes, gridPos, restoring, groupFocus],
   );
 
   // 拖完落盘 + 标记本故事有手动布局(亮出「重置布局」)。

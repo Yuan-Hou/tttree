@@ -27,6 +27,60 @@ const Y0 = 30;
 const MIN_GAP = 64; // 无标签约束的相邻列之间的最小空白(节点间距)
 const LABEL_PAD = 18; // 标签宽之外再留的安全余量(确保连线文字不贴/不压节点)
 
+// ── 滚动聚焦「本轮相关图片网格」的临时布局参数 ──
+const NODE_H = 196; // SceneNode 卡片估高(4:3 图 + 页脚),用于网格行距与宽高比匹配
+const GRID_GX = 44; // 网格相邻格水平间距
+const GRID_GY = 44; // 网格相邻格垂直间距
+const CELL_W = NODE_W + GRID_GX;
+const CELL_H = NODE_H + GRID_GY;
+const ENTER_MS = 360; // 进入网格:快速归位(留下「图飞过来」的明确动作)
+const RESTORE_MS = 950; // 解除网格:缓慢回家(留视觉线索,便于用户找到对应节点)
+const FIT_MS = 460; // 视角聚焦到网格的动画时长
+const EASE = "cubic-bezier(.22,.61,.36,1)";
+
+/** 本轮相关节点的临时网格:锚点(本轮落点场景)固定在右下角不动,其余节点向左上铺成一个
+ *  宽高比贴近视口的网格(让 fitView 后每张图尽量大)。返回「其余节点 → 临时坐标」(锚点不含)。
+ *  锚点在网格右下格,网格整体相对锚点 home 坐标向左/上偏移展开。填充顺序:自右下角起、贴着锚点
+ *  那一行先向左铺满,再逐行上移,保证紧凑、不在锚点旁留空格。 */
+function computeGridPositions(
+  anchorPos: { x: number; y: number },
+  others: string[],
+  vw: number,
+  vh: number,
+): Map<string, { x: number; y: number }> {
+  const m = others.length + 1; // 含锚点
+  const targetAspect = Math.max(0.2, vw / Math.max(1, vh));
+  let cols = 1;
+  let bestErr = Infinity;
+  for (let c = 1; c <= m; c++) {
+    const rows = Math.ceil(m / c);
+    const aspect = (c * CELL_W) / (rows * CELL_H);
+    const err = Math.abs(Math.log(aspect / targetAspect));
+    if (err < bestErr) {
+      bestErr = err;
+      cols = c;
+    }
+  }
+  const rows = Math.ceil(m / cols);
+  // 填充顺序:行从底到顶、行内从右到左,跳过锚点占据的右下格。
+  const cells: { c: number; r: number }[] = [];
+  for (let r = rows - 1; r >= 0; r--) {
+    for (let c = cols - 1; c >= 0; c--) {
+      if (r === rows - 1 && c === cols - 1) continue; // 锚点格
+      cells.push({ c, r });
+    }
+  }
+  const pos = new Map<string, { x: number; y: number }>();
+  others.forEach((id, k) => {
+    const cell = cells[k];
+    if (!cell) return;
+    const dx = (cell.c - (cols - 1)) * CELL_W; // 锚点在 c=cols-1 → 其余向左为负
+    const dy = (cell.r - (rows - 1)) * CELL_H; // 锚点在 r=rows-1 → 其余向上为负
+    pos.set(id, { x: anchorPos.x + dx, y: anchorPos.y + dy });
+  });
+  return pos;
+}
+
 interface Props {
   storyId: string;
   onJumpToTurn: (turnIndex: number) => void; // 点实线 → 滚动对话到该轮
@@ -44,10 +98,20 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
   const [data, setData] = useState<SceneMapData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
-  const [focus, setFocus] = useState<{ slug: string; page: number; nonce: number } | null>(null);
+  // 本轮聚焦:锚点 + 每个相关节点应翻到的页(nonce 变化即重应用,支持重复聚焦同一轮)。
+  const [groupFocus, setGroupFocus] = useState<{ anchor: string; pages: Map<string, number>; nonce: number } | null>(null);
+  // 临时网格:gridPos=当前被挪到网格的节点(快速进入);restoring=正在缓慢回家的节点。两者互斥。
+  const [gridPos, setGridPos] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const [restoring, setRestoring] = useState<Set<string>>(new Set());
+  const gridPosRef = useRef(gridPos); // 供事件回调/解除读到最新网格集(避免闭包旧值)
+  const restoringRef = useRef(restoring);
   const loadedFor = useRef<string | null>(null);
   const rfRef = useRef<ReactFlowInstance | null>(null);
   const flowWrapRef = useRef<HTMLDivElement>(null);
+  const nodesRef = useRef<Node[]>([]); // 同步 home 坐标,供网格相对锚点定位(避免闭包取到旧值)
+  const programmaticMove = useRef(false); // 我方 fitView 期间忽略 zoom 检测,避免自触发解除
+  const lastZoom = useRef(1);
+  const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -68,41 +132,109 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
 
   const base = useMemo(() => buildGraph(data), [data]);
 
-  // 单击对话 → 聚焦该轮落点场景节点:放大到该节点 + 让卡片翻到该轮出的那张图。
-  // 只随 nonce(每次点击)触发,不随地图刷新重跑(避免新出图时画布乱跳)。
-  useEffect(() => {
-    if (!focusReq || !data) return;
-    const edge = data.solid_edges.find((e) => e.turn_index === focusReq.turnIndex);
-    if (!edge) return;
-    const slug = edge.to;
-    const node = data.nodes.find((n) => n.slug === slug);
-    let page = 0;
-    if (edge.image_path && node) {
-      const k = node.image_paths.indexOf(edge.image_path);
-      if (k >= 0) page = k;
-    }
-    setFocus({ slug, page, nonce: focusReq.nonce });
-    // 放大并居中到该节点。用 setCenter(显式 zoom)比 fitView 到单节点更稳;取节点实测尺寸算中心。
+  // 缓慢回家:把一批节点标记为 restoring(渲染时给慢速过渡 → home),并在动画结束后清出集合。
+  const armRestore = useCallback((ids: Iterable<string>) => {
+    const add = [...ids];
+    if (add.length === 0) return;
+    setRestoring((prev) => new Set([...prev, ...add]));
+    if (restoreTimer.current) clearTimeout(restoreTimer.current);
+    restoreTimer.current = setTimeout(() => setRestoring(new Set()), RESTORE_MS + 80);
+  }, []);
+
+  // 解除网格:全部被挪节点缓慢回家(拖动/缩放/切故事触发)。纯平移画布不触发。
+  const dissolve = useCallback(() => {
+    if (gridPosRef.current.size === 0) return;
+    armRestore(gridPosRef.current.keys());
+    setGridPos(new Map());
+  }, [armRestore]);
+
+  // 单点居中(无网格场景:本轮只有锚点一张相关图)。
+  const centerOnNode = useCallback((slug: string) => {
     const inst = rfRef.current;
     if (!inst) return;
     setTimeout(() => {
       const n = inst.getNode(slug);
       if (!n) {
-        inst.fitView({ nodes: [{ id: slug }], maxZoom: 3, duration: 500, padding: 0.5 });
+        inst.fitView({ nodes: [{ id: slug }], maxZoom: 3, duration: FIT_MS, padding: 0.5 });
         return;
       }
-      const w = n.measured?.width ?? 208;
-      const h = n.measured?.height ?? 180;
-      // 自适应缩放:让节点占地图视口约 70% 的限制维度,再夹到画布缩放区间 [1, 4]
+      const w = n.measured?.width ?? NODE_W;
+      const h = n.measured?.height ?? NODE_H;
       const box = flowWrapRef.current;
       const vw = box?.clientWidth ?? 600;
       const vh = box?.clientHeight ?? 600;
       const frac = 0.7;
       const zoom = Math.max(1, Math.min(4, Math.min((vw * frac) / w, (vh * frac) / h)));
-      inst.setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom, duration: 500 });
+      programmaticMove.current = true;
+      inst.setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom, duration: FIT_MS });
+      setTimeout(() => {
+        programmaticMove.current = false;
+        lastZoom.current = inst.getViewport().zoom;
+      }, FIT_MS + 120);
     }, 40);
+  }, []);
+
+  // 滚动对话 → 聚焦该轮**所有相关场景图**:锚点(落点场景)不动,其余相关节点临时挪进
+  // 一个最大化网格、视角聚焦到网格;每个相关节点翻到它本轮出的那张图。只随 nonce 触发。
+  useEffect(() => {
+    if (!focusReq || !data) return;
+    const turnN = focusReq.turnIndex;
+    const edge = data.solid_edges.find((e) => e.turn_index === turnN);
+    if (!edge) return;
+    const anchor = edge.to;
+
+    // 相关节点 = gallery 里有「本轮出的图」的节点;page = 该图在变体序列里的下标(取最后一张)。
+    const pages = new Map<string, number>();
+    for (const node of data.nodes) {
+      const g = node.gallery ?? [];
+      let page = -1;
+      for (let k = 0; k < g.length; k++) if (g[k].turn === turnN) page = k;
+      if (page >= 0) pages.set(node.slug, page);
+    }
+    // 锚点无本轮图但实线带图 → 也给锚点定位到该图(老行为兜底)。
+    if (!pages.has(anchor) && edge.image_path) {
+      const an = data.nodes.find((n) => n.slug === anchor);
+      const k = an ? an.image_paths.indexOf(edge.image_path) : -1;
+      if (k >= 0) pages.set(anchor, k);
+    }
+    setGroupFocus({ anchor, pages, nonce: focusReq.nonce });
+
+    const inst = rfRef.current;
+    const others = [...pages.keys()].filter((id) => id !== anchor).sort();
+    if (others.length === 0 || !inst) {
+      // 无需网格:把此前被挪的节点缓慢送回,单点居中锚点。
+      armRestore(gridPosRef.current.keys());
+      setGridPos(new Map());
+      centerOnNode(anchor);
+      return;
+    }
+
+    // 网格:相对锚点 home 坐标展开。锚点 home 从 nodesRef 取(渲染坐标可能是上轮网格位)。
+    const anchorHome = nodesRef.current.find((n) => n.id === anchor)?.position ?? { x: 0, y: 0 };
+    const box = flowWrapRef.current;
+    const vw = box?.clientWidth ?? 600;
+    const vh = box?.clientHeight ?? 600;
+    const gp = computeGridPositions(anchorHome, others, vw, vh);
+    // 该恢复的恢复:上轮被挪/在挪、但本轮不在新网格里的 → 缓慢回家。
+    const leaving = [...gridPosRef.current.keys(), ...restoringRef.current].filter((id) => !gp.has(id));
+    armRestore(leaving);
+    setGridPos(gp);
+    // 视角聚焦到网格(锚点 + 其余),fitView 期间屏蔽 zoom 自触发。
+    programmaticMove.current = true;
+    setTimeout(() => {
+      inst.fitView({ nodes: [anchor, ...others].map((id) => ({ id })), padding: 0.22, duration: FIT_MS, maxZoom: 2 });
+      setTimeout(() => {
+        programmaticMove.current = false;
+        lastZoom.current = inst.getViewport().zoom;
+      }, FIT_MS + 120);
+    }, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusReq]);
+
+  // 卸载清理定时器
+  useEffect(() => () => {
+    if (restoreTimer.current) clearTimeout(restoreTimer.current);
+  }, []);
 
   // 悬停某实线 → 终点节点高亮
   const hoveredTarget = useMemo(() => {
@@ -117,10 +249,13 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
       base.nodes.map((n) => {
         let d = n.data as SceneNodeData;
         if (hoveredTarget && n.id === hoveredTarget) d = { ...d, hl: true };
-        if (focus && n.id === focus.slug) d = { ...d, focused: true, pageTo: focus.page, pageNonce: focus.nonce };
+        if (groupFocus) {
+          const page = groupFocus.pages.get(n.id);
+          if (page != null) d = { ...d, focused: true, pageTo: page, pageNonce: groupFocus.nonce };
+        }
         return d === n.data ? n : { ...n, data: d };
       }),
-    [base.nodes, hoveredTarget, focus],
+    [base.nodes, hoveredTarget, groupFocus],
   );
   const edges = useMemo(() => decorateEdges(base.edges, hoverId), [base.edges, hoverId]);
 
@@ -147,6 +282,34 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
       setHasOverrides(Object.keys(saved).length > 0);
     }
   }, [computed, storyId, scope, setNodes]);
+
+  // home 坐标镜像:供网格定位与「回家」目标读取(渲染坐标可能是临时网格位)。
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+  useEffect(() => {
+    gridPosRef.current = gridPos;
+  }, [gridPos]);
+  useEffect(() => {
+    restoringRef.current = restoring;
+  }, [restoring]);
+
+  // 渲染坐标 = home(nodes)叠加临时网格:被挪节点→网格位(快速、且禁拖以免与回家冲突);
+  // 回家中节点→home(慢速过渡);其余→home(无过渡,保证手动拖拽即时跟手)。
+  const renderNodes = useMemo(
+    () =>
+      nodes.map((n) => {
+        const g = gridPos.get(n.id);
+        if (g) {
+          return { ...n, position: g, draggable: false, style: { ...n.style, transition: `transform ${ENTER_MS}ms ${EASE}` } };
+        }
+        if (restoring.has(n.id)) {
+          return { ...n, style: { ...n.style, transition: `transform ${RESTORE_MS}ms ${EASE}` } };
+        }
+        return (n.style as { transition?: string } | undefined)?.transition ? { ...n, style: { ...n.style, transition: undefined } } : n;
+      }),
+    [nodes, gridPos, restoring],
+  );
 
   // 拖完落盘 + 标记本故事有手动布局(亮出「重置布局」)。
   const onNodeDragStop = useCallback(
@@ -192,7 +355,7 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
           </div>
         ) : (
           <ReactFlow
-            nodes={nodes}
+            nodes={renderNodes}
             edges={edges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
@@ -205,9 +368,22 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
             elementsSelectable
             zoomOnDoubleClick={false}
             proOptions={{ hideAttribution: true }}
-            onInit={(inst) => (rfRef.current = inst)}
+            onInit={(inst) => {
+              rfRef.current = inst;
+              lastZoom.current = inst.getViewport().zoom;
+            }}
             onNodesChange={onNodesChange}
+            onNodeDragStart={dissolve} // 拖动任一节点 → 临时网格缓慢解除
             onNodeDragStop={onNodeDragStop}
+            onMove={(_, vp) => {
+              // 缩放(非纯平移)→ 解除网格;我方 fitView 期间忽略,避免自触发。
+              if (programmaticMove.current) {
+                lastZoom.current = vp.zoom;
+                return;
+              }
+              if (gridPos.size > 0 && Math.abs(vp.zoom - lastZoom.current) > 1e-3) dissolve();
+              lastZoom.current = vp.zoom;
+            }}
             onEdgeClick={onEdgeClick}
             onEdgeMouseEnter={(_, edge) => {
               if ((edge.data as { turnIndex?: number } | undefined)?.turnIndex != null) setHoverId(edge.id);

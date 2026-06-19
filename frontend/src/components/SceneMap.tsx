@@ -376,12 +376,12 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
             onNodeDragStart={dissolve} // 拖动任一节点 → 临时网格缓慢解除
             onNodeDragStop={onNodeDragStop}
             onMove={(_, vp) => {
-              // 缩放(非纯平移)→ 解除网格;我方 fitView 期间忽略,避免自触发。
+              // 任何用户操作画布(平移或缩放)→ 解除网格;我方 fitView 期间忽略,避免自触发。
               if (programmaticMove.current) {
                 lastZoom.current = vp.zoom;
                 return;
               }
-              if (gridPos.size > 0 && Math.abs(vp.zoom - lastZoom.current) > 1e-3) dissolve();
+              if (gridPos.size > 0) dissolve();
               lastZoom.current = vp.zoom;
             }}
             onEdgeClick={onEdgeClick}

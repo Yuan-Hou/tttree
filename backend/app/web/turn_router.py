@@ -29,6 +29,7 @@ from app.db.session import async_session
 from app.imaging.pipeline import CANON_ORIGIN, DRAFT_ORIGIN
 from app.knowledge.store import get_knowledge
 from app.state.reducer import reduce_turn
+from app.agents.bibles import resolve_style_bible
 from app.stories.settings_store import get_or_create_settings, resolve_agent_model
 from app.stories.store import touch_story
 from app.web.jobs import active_status, start_turn_job, turn_active
@@ -69,6 +70,7 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         knowledge = await get_knowledge(s, story_id)  # 仅注入 Director-A 的设定底座
         # 故事内模型设置:各 agent 按「覆盖 → 全局默认」解析出实际模型 id(默认全 deepseek)。
         st = await get_or_create_settings(s, story_id)
+        style_bible = resolve_style_bible(st.style_bible)  # 故事自定义文风圣经 → system 前缀(空则全局默认)
         model_a = resolve_agent_model(st, "director_a")
         model_w = resolve_agent_model(st, "writer")
         model_b = resolve_agent_model(st, "director_b")
@@ -86,7 +88,8 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
 
     # ---- Director-A(逐 token 流原始 JSON,累积后解析)----
     a_messages = build_messages(
-        "director", history=history, blackboard=blackboard, user_action=user_input, knowledge=knowledge
+        "director", history=history, blackboard=blackboard, user_action=user_input,
+        knowledge=knowledge, style_bible=style_bible,
     )
     a_chunks: list[str] = []
     try:
@@ -101,7 +104,7 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
     # ---- Writer(逐 token 推)----
     w_messages = build_messages(
         "writer", history=history, blackboard=blackboard, user_action=user_input,
-        writing_brief=a.writing_brief, tips=a.tips,
+        writing_brief=a.writing_brief, tips=a.tips, style_bible=style_bible,
     )
     chunks: list[str] = []
     try:
@@ -119,11 +122,11 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
     # 两条子流交错产出 director_b_token / options_token;Options 失败不阻断(reducer 只等 B)。
     b_messages = build_messages(
         "director_review", history=history, blackboard=blackboard, user_action=user_input,
-        narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips,
+        narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips, style_bible=style_bible,
     )
     o_messages = build_messages(
         "options", history=history, blackboard=blackboard, user_action=user_input,
-        narrative=narrative, tips=a.tips,
+        narrative=narrative, tips=a.tips, style_bible=style_bible,
     )
     bo = BOResult()
     async for ev in stream_b_and_options(

@@ -117,6 +117,7 @@ async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
             director_a_model=st.director_a_model, writer_model=st.writer_model,
             director_b_model=st.director_b_model, options_model=st.options_model,
             illustrator_model=st.illustrator_model,
+            style_bible=st.style_bible, visual_style_bible=st.visual_style_bible,
         ))
 
     # Turn(逐轮复制,含每步完整上下文 + 保留原逐轮时间戳)

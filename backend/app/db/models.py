@@ -139,6 +139,10 @@ class StorySettings(Base):
     director_b_model: Mapped[str] = mapped_column(String, default="")
     options_model: Mapped[str] = mapped_column(String, default="")
     illustrator_model: Mapped[str] = mapped_column(String, default="")
+    # 故事内自定义圣经(bible 子步):空串 = 用全局打包默认。文风圣经=叙事 system 前缀,
+    # 画风圣经=illustrator 易变区。整篇覆盖,随 fork 复制、随 delete 清理。
+    style_bible: Mapped[str] = mapped_column(Text, default="")
+    visual_style_bible: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )

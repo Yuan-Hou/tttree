@@ -37,6 +37,24 @@ def settings_to_dict(s: StorySettings) -> dict:
     }
 
 
+async def update_bibles(
+    session: AsyncSession,
+    story_id: str,
+    *,
+    style_bible: str | None = None,
+    visual_style_bible: str | None = None,
+) -> StorySettings:
+    """整篇覆盖故事自定义圣经。只改传入的字段(None=不动);空串=清空 → 回退全局默认。"""
+    row = await get_or_create_settings(session, story_id)
+    if style_bible is not None:
+        row.style_bible = style_bible
+    if visual_style_bible is not None:
+        row.visual_style_bible = visual_style_bible
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
 async def update_settings(
     session: AsyncSession,
     story_id: str,

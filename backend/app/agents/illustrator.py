@@ -10,14 +10,15 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.agents.bibles import DEFAULT_VISUAL_STYLE_BIBLE
 from app.agents.context import Blackboard, Message, build_messages
-from app.agents.loader import load_prompt
 from app.db.models import ReferenceAsset
 from app.llm.chat import chat_json
 from app.llm.jsonout import loads_lenient
 from app.models.schemas import IllustratorDraft
 
-VISUAL_STYLE_BIBLE = load_prompt("visual_style_bible.md")
+# 默认画风圣经(全局打包)。每故事可在设置里自定义,调用方把生效值经 visual_style= 传入覆盖。
+VISUAL_STYLE_BIBLE = DEFAULT_VISUAL_STYLE_BIBLE
 
 # 画种/媒介定性术语:允许直接借用(对图像模型反而有用),不算「照抄」
 ALLOWED_STYLE_TERMS = ("数字概念插画", "氛围写实")

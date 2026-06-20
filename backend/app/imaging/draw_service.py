@@ -10,6 +10,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.bibles import resolve_visual_style_bible
 from app.agents.illustrator import build_illustrator_messages, render_reference_catalog, run_illustrator
 from app.assets.reference_store import list_references
 from app.db.models import ImageGen
@@ -117,6 +118,7 @@ async def prepare_draft(
         blackboard=blackboard,
         draw_request=draw_request + _kind_hint(kind),
         reference_catalog=catalog,
+        visual_style=resolve_visual_style_bible(st.visual_style_bible),  # 故事自定义画风圣经(空则全局默认)
         model=model,
         tips=tips,
         extra_instruction=extra_instruction,
@@ -155,12 +157,13 @@ async def write_illustration_draft(
     hist_imgs = await build_history_catalog(session, story_id, scene_slug, scene.get("name", scene_slug))
     catalog = render_reference_catalog(assets, history_images=hist_imgs)
     full_request = draw_request + _kind_hint(kind)
-    used = messages or build_illustrator_messages(
-        history=history, blackboard=blackboard, draw_request=full_request, reference_catalog=catalog,
-        tips=tips, extra_instruction=extra_instruction,
-    )
     st = await get_or_create_settings(session, story_id)
     model = resolve_agent_model(st, "illustrator")  # 绘图写稿 Agent 的故事内模型设置
+    used = messages or build_illustrator_messages(
+        history=history, blackboard=blackboard, draw_request=full_request, reference_catalog=catalog,
+        visual_style=resolve_visual_style_bible(st.visual_style_bible),  # 故事自定义画风圣经(空则全局默认)
+        tips=tips, extra_instruction=extra_instruction,
+    )
     draft = await run_illustrator(
         history=history, blackboard=blackboard, draw_request=full_request,
         reference_catalog=catalog, messages=used, model=model,

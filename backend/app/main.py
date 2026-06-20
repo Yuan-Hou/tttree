@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db.session import create_all, engine
 from app.storage import STORAGE_ROOT, ensure_dirs
+from app.web.bibles_router import router as bibles_router
 from app.web.draw_router import router as draw_router
 from app.web.export_router import router as export_router
 from app.web.knowledge_router import router as knowledge_router
@@ -38,6 +39,7 @@ app.include_router(references_router)
 app.include_router(time_router)
 app.include_router(settings_router)
 app.include_router(knowledge_router)
+app.include_router(bibles_router)
 app.include_router(scene_map_router)
 app.include_router(export_router)
 

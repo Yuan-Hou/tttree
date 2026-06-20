@@ -20,6 +20,7 @@ system / history / 黑板 / 玩家输入这一段前缀对三个 agent 完全一
 import json
 from typing import Any, Literal
 
+from app.agents.bibles import DEFAULT_STYLE_BIBLE
 from app.agents.loader import load_prompt
 
 AgentRole = Literal["director", "writer", "director_review", "options", "illustrator"]
@@ -27,7 +28,9 @@ AgentRole = Literal["director", "writer", "director_review", "options", "illustr
 Message = dict[str, str]
 Blackboard = dict[str, Any]
 
-STYLE_BIBLE = load_prompt("style_bible.md")
+# 默认文风圣经(全局打包)。每故事可在设置里自定义,届时由调用方把生效值经 build_messages(style_bible=...)
+# 传入覆盖这份默认 —— 仍是 system 前缀首条,缓存铁律不破(各故事前缀本就独立)。
+STYLE_BIBLE = DEFAULT_STYLE_BIBLE
 DIRECTOR_TASK = load_prompt("director_task.md")
 WRITER_TASK = load_prompt("writer_task.md")
 DIRECTOR_REVIEW_TASK = load_prompt("director_review_task.md")
@@ -144,6 +147,7 @@ def build_messages(
     narrative: str | None = None,
     director_a_plan: dict[str, Any] | None = None,
     knowledge: str | None = None,
+    style_bible: str | None = None,
     visual_style: str | None = None,
     reference_catalog: str | None = None,
     tips: list[str] | None = None,
@@ -162,7 +166,9 @@ def build_messages(
     history 之前的稳定前缀位置。Writer / Director-B / illustrator 的 messages 与未引入知识库前
     逐字节相同——它们的缓存完全不受影响;A 的知识库基本不变,历史缓存大部分仍命中。
     """
-    messages: list[Message] = [{"role": "system", "content": STYLE_BIBLE}]
+    # 文风圣经:故事自定义优先,否则用全局默认。仍是 system 首条前缀 —— 同一故事内对所有 agent
+    # 逐字节一致、跨轮稳定(用户改了才变),缓存铁律不破。
+    messages: list[Message] = [{"role": "system", "content": style_bible or STYLE_BIBLE}]
     if agent_role == "director" and knowledge:
         messages.append({"role": "system", "content": _render_knowledge(knowledge)})
     messages.extend(history)

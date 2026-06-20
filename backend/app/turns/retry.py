@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.bibles import resolve_style_bible
 from app.agents.context import build_messages
 from app.agents.director import parse_director_output, stream_director
 from app.agents.director_review import parse_review_output, stream_director_review
@@ -116,6 +117,7 @@ async def stream_retry_turn(session: AsyncSession, story_id: str, entry: str) ->
     knowledge = await get_knowledge(session, story_id)
     # 故事内模型设置:重走的 agent 也按各自设置取模型(默认全 deepseek)。
     st = await get_or_create_settings(session, story_id)
+    style_bible = resolve_style_bible(st.style_bible)  # 故事自定义文风圣经(空则全局默认)
     model_a = resolve_agent_model(st, "director_a")
     model_w = resolve_agent_model(st, "writer")
     model_b = resolve_agent_model(st, "director_b")
@@ -129,7 +131,7 @@ async def stream_retry_turn(session: AsyncSession, story_id: str, entry: str) ->
         narrative = turn_n.narrative
         o_messages = json.loads(turn_n.options_messages or "[]") or build_messages(
             "options", history=history, blackboard=pre_bb, user_action=user_input,
-            narrative=narrative, tips=a.tips,
+            narrative=narrative, tips=a.tips, style_bible=style_bible,
         )
         o_chunks: list[str] = []
         try:
@@ -156,7 +158,8 @@ async def stream_retry_turn(session: AsyncSession, story_id: str, entry: str) ->
     # ---- Director-A:新走(director_a 切入)或保留 ----
     # A 的上下文只取决于「本轮之前的状态」,重试时不变 → 存档的 director_a_messages 始终是其正确上下文。
     a_messages = json.loads(turn_n.director_a_messages or "[]") or build_messages(
-        "director", history=history, blackboard=pre_bb, user_action=user_input, knowledge=knowledge
+        "director", history=history, blackboard=pre_bb, user_action=user_input,
+        knowledge=knowledge, style_bible=style_bible,
     )
     if entry == "director_a":
         a_chunks: list[str] = []
@@ -179,13 +182,13 @@ async def stream_retry_turn(session: AsyncSession, story_id: str, entry: str) ->
             # A 保留 → Writer 上下文与原先逐字节相同 → 复用存档 messages(缓存命中)
             w_messages = json.loads(turn_n.writer_messages or "[]") or build_messages(
                 "writer", history=history, blackboard=pre_bb, user_action=user_input,
-                writing_brief=a.writing_brief, tips=a.tips,
+                writing_brief=a.writing_brief, tips=a.tips, style_bible=style_bible,
             )
         else:
             # A 是新的 → brief / tips 变了 → 按新 brief 重建 Writer 上下文
             w_messages = build_messages(
                 "writer", history=history, blackboard=pre_bb, user_action=user_input,
-                writing_brief=a.writing_brief, tips=a.tips,
+                writing_brief=a.writing_brief, tips=a.tips, style_bible=style_bible,
             )
         chunks: list[str] = []
         try:
@@ -206,13 +209,13 @@ async def stream_retry_turn(session: AsyncSession, story_id: str, entry: str) ->
         # A、Writer 均保留 → B 上下文与原先逐字节相同 → 复用存档 messages(缓存命中)
         b_messages = json.loads(turn_n.director_b_messages or "[]") or build_messages(
             "director_review", history=history, blackboard=pre_bb, user_action=user_input,
-            narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips,
+            narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips, style_bible=style_bible,
         )
     else:
         # 上游(A 或 Writer)变了 → 按现行成稿/预案重建 B 上下文
         b_messages = build_messages(
             "director_review", history=history, blackboard=pre_bb, user_action=user_input,
-            narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips,
+            narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips, style_bible=style_bible,
         )
     b_chunks: list[str] = []
     try:
@@ -235,7 +238,7 @@ async def stream_retry_turn(session: AsyncSession, story_id: str, entry: str) ->
     else:
         o_messages = build_messages(
             "options", history=history, blackboard=pre_bb, user_action=user_input,
-            narrative=narrative, tips=a.tips,
+            narrative=narrative, tips=a.tips, style_bible=style_bible,
         )
         oo_chunks: list[str] = []
         try:

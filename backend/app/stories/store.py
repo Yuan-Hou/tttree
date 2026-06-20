@@ -116,7 +116,7 @@ async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
             story_id=new_id, default_model=st.default_model,
             director_a_model=st.director_a_model, writer_model=st.writer_model,
             director_b_model=st.director_b_model, options_model=st.options_model,
-            illustrator_model=st.illustrator_model,
+            illustrator_model=st.illustrator_model, image_model=st.image_model,
             style_bible=st.style_bible, visual_style_bible=st.visual_style_bible,
         ))
 

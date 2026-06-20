@@ -23,9 +23,15 @@ class Settings(BaseSettings):
     # 让已写进 .env 的 CLAUDE_API_KEY 通过校验(Settings 禁止未声明字段)。
     claude_api_key: str | None = None
 
-    # Google Gemini——provider 适配尚未接入,此处先声明 key 字段,
-    # 让已写进 .env 的 GOOGLE_API_KEY 通过校验(Settings 禁止未声明字段)。
+    # Google Gemini——文本走 OpenAI 兼容端点(/v1beta/openai/),与其余 OpenAI 兼容 provider 同路径;
+    # 出图走原生 generateContent(见 imaging 适配)。base_url 默认指向官方兼容端点,可被全局设置覆盖。
     google_api_key: str | None = None
+    google_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    # Gemini 出图(原生 generateContent)的接入点 base_url;与上面的「文本 OpenAI 兼容」端点不同。
+    google_image_base_url: str = "https://generativelanguage.googleapis.com/v1beta/"
+
+    # 全局设置(自填供应商 key)落库时的对称加密主密钥。未配置 → 自填 key 功能不可用(仅本站服务可用)。
+    app_secret: str | None = None
 
 
 settings = Settings()

@@ -143,6 +143,26 @@ class StorySettings(Base):
     # 画风圣经=illustrator 易变区。整篇覆盖,随 fork 复制、随 delete 清理。
     style_bible: Mapped[str] = mapped_column(Text, default="")
     visual_style_bible: Mapped[str] = mapped_column(Text, default="")
+    # 绘图模型(image_model 子步):空串 = 用全局默认绘图模型(gpt-image-2)。取值见 imaging 的图模型清单。
+    image_model: Mapped[str] = mapped_column(String, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class AppSettings(Base):
+    """全站单例设置(尚无用户系统期):目前只含 6 个接入点的供应商配置。
+
+    单行,主键固定为 'singleton'。endpoints_json 形如
+    {endpoint_id: {"mode": "site"|"custom", "base_url": str, "api_key_enc": str}}。
+    site 模式的接入点可不出现在该 dict;custom 项必含 base_url + api_key_enc(密文,见 app.crypto)。
+    读出后解密成内存覆盖表(app.llm.endpoints._OVERRIDES)。
+    """
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default="singleton")
+    endpoints_json: Mapped[str] = mapped_column(Text, default="{}")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )

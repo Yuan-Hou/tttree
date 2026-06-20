@@ -1,7 +1,10 @@
-"""阶段③:执行层。把(用户已确认的)提示词 + 解析后的参考图,翻译成 gpt-image-2 调用。
+"""阶段③:执行层。把(用户已确认的)提示词 + 解析后的参考图,翻译成绘图模型调用。
 
-这是一个可被异步调用的纯执行函数,M4 接前端时直接复用,无需改动。
-对用户/对模型全程用语义名;只有这里,才把语义名按引用清单映射成实际文件路径。
+可被异步调用的纯执行函数;按故事所选绘图模型分流到两条出图 API:
+- gpt-image-2(OpenAI images,generate/edit);
+- gemini-*-image(Google 原生 generateContent,参考图作 inline 图块)。
+两条都经接入点层(app.llm.endpoints)取 base_url + key(本站/自定义)。对用户/对模型全程用语义名;
+只有这里,才把语义名按引用清单映射成实际文件路径。
 """
 
 import base64
@@ -11,7 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.config import settings
+from app.imaging.image_models import get_image_model
+from app.llm.endpoints import resolve_endpoint
 from app.llm.openai_client import get_openai_client
 from app.models.schemas import ReferenceRef
 from app.storage import BACKEND_ROOT, IMAGES_SUBDIR
@@ -20,7 +24,7 @@ DEFAULT_SIZE = "1536x1024"  # 横构图,宽高均被 16 整除
 
 
 class ImageGenError(Exception):
-    """gpt-image-2 调用失败(含内容审核拒绝/参数错误/网络等)。执行层捕获后抛出,
+    """绘图模型调用失败(含内容审核拒绝/参数错误/网络等)。执行层捕获后抛出,
     由上层告知用户、支持重试,不崩溃。"""
 
 
@@ -65,38 +69,94 @@ async def execute_image(
     scene_slug: str = "scene",
     size: str = DEFAULT_SIZE,
     base_dir: Path = BACKEND_ROOT,
-    model: str | None = None,
+    image_model: str | None = None,
 ) -> ExecResult:
-    """有参考图 → images.edit(变体,传参考图);无 → images.generate(文生图)。
-    不传 input_fidelity(gpt-image-2 不允许)。失败抛 ImageGenError,不崩溃。"""
-    model = model or settings.openai_image_model
-    client = get_openai_client()
+    """按故事所选绘图模型出图。有参考图 → 变体/编辑(传参考图);无 → 文生图。
+    失败抛 ImageGenError,不崩溃。确认闸门在上层,本函数不自带旁路。"""
+    im = get_image_model(image_model)
     (base_dir / IMAGES_SUBDIR).mkdir(parents=True, exist_ok=True)
     out_rel = f"{IMAGES_SUBDIR}/{scene_slug}_{uuid.uuid4().hex[:8]}.png"
-
     use_edit = bool(ref_files)
-    try:
-        if use_edit:
-            handles = [Path(p).open("rb") for p in ref_files]
-            try:
-                resp = await client.images.edit(
-                    model=model, image=handles, prompt=final_prompt, size=size
-                )
-            finally:
-                for h in handles:
-                    h.close()
-        else:
-            resp = await client.images.generate(model=model, prompt=final_prompt, size=size)
-    except Exception as exc:  # 含内容审核拒绝(BadRequest)/网络/参数等,统一兜住不崩溃
-        raise ImageGenError(f"{type(exc).__name__}: {exc}") from exc
 
-    b64 = resp.data[0].b64_json if resp.data else None
-    if not b64:
-        raise ImageGenError("API 未返回图像数据(可能被内容策略拦截)")
-    (base_dir / out_rel).write_bytes(base64.b64decode(b64))
+    if im.api == "gemini":
+        png = await _gemini_generate(im, final_prompt=final_prompt, ref_files=ref_files)
+    else:
+        png = await _openai_generate(
+            im, final_prompt=final_prompt, ref_files=ref_files, size=size, use_edit=use_edit
+        )
 
+    (base_dir / out_rel).write_bytes(png)
     return ExecResult(
         output_path=out_rel,
         api_call="edit" if use_edit else "generate",
         ref_files_sent=[str(Path(p)) for p in ref_files],
     )
+
+
+async def _openai_generate(im, *, final_prompt, ref_files, size, use_edit) -> bytes:
+    """gpt-image-2:images.edit(有参考图)/ images.generate(文生图)。不传 input_fidelity。"""
+    client = get_openai_client()  # 走 openai 接入点(本站 .env / 全局设置自定义)
+    try:
+        if use_edit:
+            handles = [Path(p).open("rb") for p in ref_files]
+            try:
+                resp = await client.images.edit(
+                    model=im.model, image=handles, prompt=final_prompt, size=size
+                )
+            finally:
+                for h in handles:
+                    h.close()
+        else:
+            resp = await client.images.generate(model=im.model, prompt=final_prompt, size=size)
+    except Exception as exc:  # 内容审核拒绝(BadRequest)/网络/参数等,统一兜住不崩溃
+        raise ImageGenError(f"{type(exc).__name__}: {exc}") from exc
+
+    b64 = resp.data[0].b64_json if resp.data else None
+    if not b64:
+        raise ImageGenError("API 未返回图像数据(可能被内容策略拦截)")
+    return base64.b64decode(b64)
+
+
+_GEMINI_TIMEOUT = 180.0  # 出图慢,给足
+
+
+async def _gemini_generate(im, *, final_prompt, ref_files) -> bytes:
+    """Gemini 原生 generateContent 出图。参考图(若有)作 inlineData 图块一并送入,实现编辑/变体。
+
+    经 google_image 接入点取 base_url + key(本站 .env / 全局设置自定义)。请求声明
+    responseModalities=["IMAGE"];响应里取第一块 inlineData 的 base64 图。失败统一抛 ImageGenError。
+    """
+    import httpx
+
+    base_url, key = resolve_endpoint(im.endpoint_id)
+    if not key:
+        raise ImageGenError(
+            f"接入点 {im.endpoint_id!r} 未配置 API key(本站点服务需 .env 的 GOOGLE_API_KEY,或在全局设置自填)"
+        )
+    url = base_url.rstrip("/") + f"/models/{im.model}:generateContent"
+
+    parts: list[dict] = [{"text": final_prompt}]
+    for p in ref_files:
+        raw = Path(p).read_bytes()
+        mime = "image/png" if str(p).lower().endswith(".png") else "image/jpeg"
+        parts.append({"inlineData": {"mimeType": mime, "data": base64.b64encode(raw).decode()}})
+    body = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {"responseModalities": ["IMAGE"]},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=_GEMINI_TIMEOUT) as client:
+            resp = await client.post(url, headers={"x-goog-api-key": key}, json=body)
+    except Exception as exc:  # 网络/超时等
+        raise ImageGenError(f"{type(exc).__name__}: {exc}") from exc
+    if resp.status_code != 200:
+        raise ImageGenError(f"Gemini 出图 HTTP {resp.status_code}: {resp.text[:300]}")
+
+    data = resp.json()
+    for cand in data.get("candidates", []):
+        for part in (cand.get("content") or {}).get("parts", []):
+            inline = part.get("inlineData") or part.get("inline_data")
+            if inline and inline.get("data"):
+                return base64.b64decode(inline["data"])
+    raise ImageGenError("Gemini 未返回图像数据(可能被内容策略拦截或模型不支持出图)")

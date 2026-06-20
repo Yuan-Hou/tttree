@@ -52,6 +52,9 @@ def _add_missing_columns(conn) -> None:
         for col in ("style_bible", "visual_style_bible"):
             if col not in ss_cols:
                 conn.execute(text(f"ALTER TABLE story_settings ADD COLUMN {col} TEXT DEFAULT ''"))
+    # 绘图模型覆盖(image_model 子步):空串 = 用全局默认绘图模型。
+    if ss_cols and "image_model" not in ss_cols:
+        conn.execute(text("ALTER TABLE story_settings ADD COLUMN image_model VARCHAR DEFAULT ''"))
 
 
 # 应用级默认引擎/会话工厂(仅在被实际使用时才会创建 DB 文件)

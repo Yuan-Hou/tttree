@@ -17,7 +17,11 @@ from app.db.models import ImageGen
 from app.imaging.executor import ImageGenError, ResolvedRefs, execute_image, resolve_references
 from app.imaging.pipeline import DRAFT_ORIGIN, is_canon_origin, record_generation
 from app.models.schemas import IllustratorDraft, ReferenceRef
-from app.stories.settings_store import get_or_create_settings, resolve_agent_model
+from app.stories.settings_store import (
+    get_or_create_settings,
+    resolve_agent_model,
+    resolve_image_model,
+)
 from app.storage import BACKEND_ROOT, IMAGES_SUBDIR
 
 _HISTORY_TAGS = ["初见", "再访", "其后"]
@@ -192,7 +196,11 @@ async def picture_from_refs(
     """
     assets = await list_references(session, story_id)
     resolved = resolve_references(references, {a.id: a for a in assets})
-    result = await execute_image(final_prompt=final_prompt, ref_files=resolved.files, scene_slug=scene_slug)
+    st = await get_or_create_settings(session, story_id)
+    result = await execute_image(
+        final_prompt=final_prompt, ref_files=resolved.files, scene_slug=scene_slug,
+        image_model=resolve_image_model(st),  # 故事所选绘图模型(空则全局默认 gpt-image-2)
+    )
     ig = await record_generation(
         session,
         story_id=story_id,
@@ -297,8 +305,10 @@ async def apply_decision(
         return {"action": "reuse", "scene": bundle.scene_slug, "image_path": path, "imagegen_id": ig.id}
 
     if decision == "confirm":  # 真出图(花钱)
+        st = await get_or_create_settings(session, story_id)
         result = await execute_image(
-            final_prompt=final_prompt, ref_files=use_refs.files, scene_slug=bundle.scene_slug
+            final_prompt=final_prompt, ref_files=use_refs.files, scene_slug=bundle.scene_slug,
+            image_model=resolve_image_model(st),  # 故事所选绘图模型(空则全局默认 gpt-image-2)
         )
         ig = await record_generation(
             session,

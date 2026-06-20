@@ -7,6 +7,7 @@ resolve_agent_model 是接入层与 orchestration 之间的唯一解析点:
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import StorySettings
+from app.imaging.image_models import DEFAULT_IMAGE_MODEL_ID, is_known_image_model
 from app.llm.registry import AGENT_KEYS, DEFAULT_MODEL_ID, is_known_model
 
 
@@ -29,11 +30,18 @@ def resolve_agent_model(s: StorySettings, agent: str) -> str:
     return override or s.default_model
 
 
+def resolve_image_model(s: StorySettings) -> str:
+    """该故事实际使用的绘图模型 id:有覆盖用覆盖,否则用全局默认(gpt-image-2)。"""
+    return (s.image_model or "").strip() or DEFAULT_IMAGE_MODEL_ID
+
+
 def settings_to_dict(s: StorySettings) -> dict:
     return {
         "default_model": s.default_model,
         "overrides": {k: getattr(s, f"{k}_model") for k in AGENT_KEYS},
         "effective": {k: resolve_agent_model(s, k) for k in AGENT_KEYS},
+        "image_model": s.image_model or "",  # 空 = 用全局默认绘图模型
+        "image_model_effective": resolve_image_model(s),
     }
 
 
@@ -61,15 +69,23 @@ async def update_settings(
     *,
     default_model: str | None = None,
     overrides: dict[str, str] | None = None,
+    image_model: str | None = None,
 ) -> StorySettings:
     """更新模型设置。default_model 必须是已知模型;overrides 的值可为 ""(=回到全局默认),
-    非空则必须是已知模型。只改传入的字段,其余保持不变。"""
+    非空则必须是已知模型。image_model 可为 ""(=用全局默认绘图模型),非空则必须是已知绘图模型。
+    只改传入的字段,其余保持不变。"""
     row = await get_or_create_settings(session, story_id)
 
     if default_model is not None:
         if not is_known_model(default_model):
             raise ValueError(f"未知模型: {default_model!r}")
         row.default_model = default_model
+
+    if image_model is not None:
+        iid = image_model.strip()
+        if iid and not is_known_image_model(iid):
+            raise ValueError(f"未知绘图模型: {iid!r}")
+        row.image_model = iid
 
     if overrides is not None:
         for agent, model_id in overrides.items():

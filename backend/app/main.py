@@ -5,11 +5,13 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.db.session import create_all, engine
+from app.db.session import async_session, create_all, engine
+from app.global_settings_store import load_overrides_into_memory
 from app.storage import STORAGE_ROOT, ensure_dirs
 from app.web.bibles_router import router as bibles_router
 from app.web.draw_router import router as draw_router
 from app.web.export_router import router as export_router
+from app.web.global_settings_router import router as global_settings_router
 from app.web.knowledge_router import router as knowledge_router
 from app.web.references_router import router as references_router
 from app.web.scene_map_router import router as scene_map_router
@@ -28,6 +30,9 @@ _SPA_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 async def lifespan(app: FastAPI):
     await create_all(engine)
     ensure_dirs()
+    # 全局设置:把库里自填的接入点配置载入内存覆盖表,供 registry 取用。
+    async with async_session() as session:
+        await load_overrides_into_memory(session)
     yield
 
 
@@ -40,6 +45,7 @@ app.include_router(time_router)
 app.include_router(settings_router)
 app.include_router(knowledge_router)
 app.include_router(bibles_router)
+app.include_router(global_settings_router)
 app.include_router(scene_map_router)
 app.include_router(export_router)
 

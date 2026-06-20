@@ -26,28 +26,19 @@ from functools import lru_cache
 from openai import AsyncOpenAI
 
 from app.config import settings
-
-
-@dataclass(frozen=True)
-class Provider:
-    name: str
-    base_url: str | None  # None = SDK 默认(OpenAI 官方)
-    api_key_field: str    # 取 settings 上的哪个字段作 API key
+from app.llm.endpoints import resolve_endpoint
 
 
 @dataclass(frozen=True)
 class ModelChoice:
     id: str        # 对外暴露 / 存库的稳定标识(界面与 StorySettings 都用它)
     label: str     # 界面展示名
-    provider: str  # 指向 PROVIDERS
+    provider: str  # provider 名(经 _PROVIDER_ENDPOINT 映射到接入点;见 app.llm.endpoints)
     model: str     # 实际发给 API 的 model 名
 
 
-PROVIDERS: dict[str, Provider] = {
-    "deepseek": Provider("deepseek", settings.deepseek_base_url, "deepseek_api_key"),
-    "openai": Provider("openai", settings.openai_base_url, "openai_api_key"),
-    "zai": Provider("zai", settings.zai_base_url, "zai_api_key"),
-}
+# 各模型的 base_url + API key 不再由本模块直接持有,而是经接入点层(app.llm.endpoints)按
+# 「本站点服务(.env) / 自定义(全局设置)」解析。本模块只保留 provider→endpoint 映射与 client 构建。
 
 # —— 可选模型清单(增改模型只动这里)——
 # GLM 的对外 id 即发给 API 的 model 名;若 Z.ai 实际模型名有出入,只改这两行的最后一个参数。
@@ -62,6 +53,11 @@ MODEL_CHOICES: list[ModelChoice] = [
     ModelChoice("claude-opus-4.6", "Claude Opus 4.6", "anthropic", "claude-opus-4-6"),
     ModelChoice("claude-opus-4.8", "Claude Opus 4.8", "anthropic", "claude-opus-4-8"),
     ModelChoice("claude-sonnet-4.6", "Claude Sonnet 4.6", "anthropic", "claude-sonnet-4-6"),
+    # Google Gemini 文本(OpenAI 兼容):对外 id 即发给 API 的 model 名。response_format json_object
+    # 与流式均受支持,故走与 DeepSeek/OpenAI 同一调用路径;JSON 仍靠现有 prompt「json」约束可靠解析。
+    ModelChoice("gemini-3.5-flash", "Gemini 3.5 Flash", "google", "gemini-3.5-flash"),
+    ModelChoice("gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", "google", "gemini-3.1-flash-lite"),
+    ModelChoice("gemini-3.1-pro-preview", "Gemini 3.1 Pro (Preview)", "google", "gemini-3.1-pro-preview"),
 ]
 
 _BY_ID: dict[str, ModelChoice] = {m.id: m for m in MODEL_CHOICES}
@@ -73,16 +69,34 @@ DEFAULT_MODEL_ID = "deepseek-v4-pro"
 AGENT_KEYS: tuple[str, ...] = ("director_a", "writer", "director_b", "options", "illustrator")
 
 
-@lru_cache
-def _client_for_provider(provider_name: str) -> AsyncOpenAI:
-    p = PROVIDERS[provider_name]
-    key = getattr(settings, p.api_key_field)
-    if not key:
-        raise RuntimeError(f"provider {provider_name!r} 的 API key({p.api_key_field})未配置")
-    kwargs: dict = {"api_key": key}
-    if p.base_url:
-        kwargs["base_url"] = p.base_url
+# provider → 接入点 id(google 文本走 google_text;出图 google_image 由 imaging 侧另取)。
+_PROVIDER_ENDPOINT: dict[str, str] = {
+    "deepseek": "deepseek",
+    "openai": "openai",
+    "zai": "zai",
+    "anthropic": "anthropic",
+    "google": "google_text",
+}
+
+
+@lru_cache(maxsize=32)
+def _openai_client(base_url: str | None, api_key: str) -> AsyncOpenAI:
+    """按 (base_url, api_key) 复用 client。全局设置改 endpoint/key → 解析出不同二元组 → 自然换新 client,
+    旧的留在缓存里不再命中(数量有界,可接受);故 _client_for_provider 本身不再缓存。"""
+    kwargs: dict = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
     return AsyncOpenAI(**kwargs)
+
+
+def _client_for_provider(provider_name: str) -> AsyncOpenAI:
+    endpoint_id = _PROVIDER_ENDPOINT[provider_name]
+    base_url, key = resolve_endpoint(endpoint_id)
+    if not key:
+        raise RuntimeError(
+            f"接入点 {endpoint_id!r} 未配置 API key(本站点服务需 .env,或在全局设置自填)"
+        )
+    return _openai_client(base_url, key)
 
 
 def resolve_chat(model_id: str | None) -> tuple[AsyncOpenAI, str]:
@@ -105,14 +119,24 @@ def provider_of(model_id: str | None) -> str:
     return (_BY_ID.get(model_id or "") or _BY_ID[DEFAULT_MODEL_ID]).provider
 
 
-@lru_cache
-def _anthropic_client():
-    """AsyncAnthropic(惰性导入 SDK,未装/未配 key 时只有真用到 Claude 才报错)。"""
+@lru_cache(maxsize=8)
+def _anthropic_client_for(base_url: str | None, api_key: str):
+    """AsyncAnthropic(惰性导入 SDK)。按 (base_url, api_key) 复用,理由同 _openai_client。"""
     from anthropic import AsyncAnthropic  # 惰性:不接 Claude 的部署不强依赖该包
 
-    if not settings.claude_api_key:
-        raise RuntimeError("provider 'anthropic' 的 API key(claude_api_key)未配置")
-    return AsyncAnthropic(api_key=settings.claude_api_key)
+    kwargs: dict = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    return AsyncAnthropic(**kwargs)
+
+
+def _anthropic_client():
+    base_url, key = resolve_endpoint("anthropic")
+    if not key:
+        raise RuntimeError(
+            "接入点 'anthropic' 未配置 API key(本站点服务需 .env 的 CLAUDE_API_KEY,或在全局设置自填)"
+        )
+    return _anthropic_client_for(base_url, key)
 
 
 def resolve_anthropic(model_id: str | None):

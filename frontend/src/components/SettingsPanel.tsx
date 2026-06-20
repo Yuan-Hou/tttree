@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import type { SettingsSection } from "../types";
+import { BibleEditor } from "./BibleEditor";
 import { GalleryEditor } from "./GalleryEditor";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { ModelSettings } from "./ModelSettings";
@@ -7,20 +9,23 @@ interface Props {
   storyId: string;
   title: string;
   onClose: () => void;
+  initialSection?: SettingsSection; // 打开时直达的分区(工作台「数据源」节点用);省略=模型
 }
 
-// 故事内设置的分区:模型 / 知识库 / 图库。都与故事绑定,随 fork 复制、随 delete 清理。
+// 故事内设置的分区:模型 / 知识库 / 文风 / 画风 / 图库。都与故事绑定,随 fork 复制、随 delete 清理。
 const SECTIONS = [
   { id: "model", label: "模型", hint: "各 agent 用哪个 LLM" },
   { id: "knowledge", label: "知识库", hint: "设定圣经 · 只注入导演 A" },
+  { id: "style", label: "文风圣经", hint: "叙事文风 · 可套模板" },
+  { id: "visual", label: "画风圣经", hint: "绘图风格 · 可套模板" },
   { id: "gallery", label: "图库", hint: "参考图素材" },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
 
 /** 故事内设置:与故事绑定(随 fork 复制、随 delete 清理)的配置面板。覆盖层大视图,延续冷白基调。 */
-export function SettingsPanel({ storyId, title, onClose }: Props) {
-  const [section, setSection] = useState<SectionId>("model");
+export function SettingsPanel({ storyId, title, onClose, initialSection }: Props) {
+  const [section, setSection] = useState<SectionId>(initialSection ?? "model");
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -74,6 +79,10 @@ export function SettingsPanel({ storyId, title, onClose }: Props) {
               <ModelSettings storyId={storyId} />
             ) : section === "knowledge" ? (
               <KnowledgeEditor storyId={storyId} />
+            ) : section === "style" ? (
+              <BibleEditor storyId={storyId} kind="style" />
+            ) : section === "visual" ? (
+              <BibleEditor storyId={storyId} kind="visual" />
             ) : (
               <GalleryEditor storyId={storyId} />
             )}

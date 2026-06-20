@@ -189,6 +189,9 @@ export interface StorySettings {
   models: ModelChoice[]; // 可选模型清单
 }
 
+// 故事内设置面板的分区 id(SettingsPanel 左栏)。工作台「数据源」节点据此直达对应分区。
+export type SettingsSection = "model" | "knowledge" | "style" | "visual" | "gallery";
+
 // ── 场景地图(静态,第一版):GET /story/{id}/scene-map ──
 export interface SceneMapGalleryItem {
   path: string;

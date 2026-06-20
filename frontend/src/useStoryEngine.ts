@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import { snapshotToTurns } from "./snapshot";
 import { useToast } from "./components/Toast";
-import type { AgentStep, Blackboard, Draft, DraftRef, DrawProposal, PickedRef, StepStatus, StoryInfo, TurnView } from "./types";
+import type { AgentStep, Blackboard, Draft, DraftRef, DrawProposal, PickedRef, SettingsSection, StepStatus, StoryInfo, TurnView } from "./types";
 
 export type { TurnView };
 
@@ -785,9 +785,14 @@ export function useStoryEngine() {
     setScopeTurn(latestTurn);
   }, [latestTurn]);
 
-  // ── 故事内设置(知识库 / 图库 / 模型,与故事绑定)──
+  // ── 故事内设置(模型 / 知识库 / 文风 / 画风 / 图库,与故事绑定)──
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("model");
+  // 可带分区直达(工作台「数据源」节点用);作 onClick 处理器时传入的是事件,非字符串 → 忽略,沿用上次分区。
+  const openSettings = useCallback((section?: SettingsSection) => {
+    if (typeof section === "string") setSettingsSection(section);
+    setSettingsOpen(true);
+  }, []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   return {
@@ -800,6 +805,6 @@ export function useStoryEngine() {
     writingIds, generatingIds, onWriting, onGenerating,
     doRollback, doRetry, doFork, saveStepContext, reloadScope,
     // 故事内设置
-    settingsOpen, openSettings, closeSettings,
+    settingsOpen, settingsSection, openSettings, closeSettings,
   };
 }

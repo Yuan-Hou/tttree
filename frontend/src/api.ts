@@ -211,6 +211,34 @@ export const saveKnowledge = (id: string, content: string) =>
     },
   );
 
+// ── 故事内设置:自定义圣经(文风 / 画风)+ 预制模板 ──
+export interface BibleTemplate {
+  name: string; // 文件名(去扩展),"default" = 打包默认
+  content: string;
+}
+export interface BibleSection {
+  custom: string; // 该故事当前自定义值(空串 = 用 default)
+  default: string; // 全局打包默认正文
+  templates: BibleTemplate[];
+}
+export interface Bibles {
+  style: BibleSection; // 文风圣经(叙事 system 前缀)
+  visual: BibleSection; // 画风圣经(绘图)
+}
+
+export const getBibles = (id: string) => jget<Bibles>(`/story/${id}/bibles`);
+
+export const saveBibles = (
+  id: string,
+  body: { style_bible?: string; visual_style_bible?: string },
+) =>
+  fetch(`/story/${id}/bibles`, { method: "PUT", headers: json, body: JSON.stringify(body) }).then(
+    async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      return r.json() as Promise<Bibles>;
+    },
+  );
+
 // ── 故事内设置:参考图库 CRUD(复用 M4.5-E 接口)──
 export const listReferences = (id: string) => jget<LibraryAsset[]>(`/story/${id}/references`);
 

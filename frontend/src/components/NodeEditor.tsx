@@ -63,8 +63,8 @@ export function NodeEditor(p: Props) {
             <div
               className={
                 step === "writer"
-                  ? "whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-ink"
-                  : "whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-ink"
+                  ? "shrink-0 whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-ink"
+                  : "max-h-[420px] shrink-0 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[11.5px] leading-relaxed text-ink"
               }
             >
               {liveText}
@@ -129,7 +129,7 @@ export function NodeEditor(p: Props) {
 
       <Label>输出(信息源 · 改输入不动它)</Label>
       {step === "writer" ? (
-        <div className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-ink">{String(sc.output)}</div>
+        <div className="shrink-0 whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-ink">{String(sc.output)}</div>
       ) : (
         <Json value={sc.output} />
       )}
@@ -173,7 +173,7 @@ const Label = ({ children }: { children: React.ReactNode }) => (
 );
 function Json({ value }: { value: unknown }) {
   return (
-    <pre className="max-h-[360px] overflow-auto rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[11.5px] leading-relaxed text-ink">
+    <pre className="max-h-[360px] shrink-0 overflow-auto rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[11.5px] leading-relaxed text-ink">
       {JSON.stringify(value, null, 2)}
     </pre>
   );

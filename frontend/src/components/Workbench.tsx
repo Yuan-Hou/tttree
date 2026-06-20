@@ -5,6 +5,7 @@ import type {
   ContextMessage,
   DrawItem,
   DrawProposal,
+  SettingsSection,
   StepStatus,
   TurnContexts,
   TurnDraws,
@@ -44,6 +45,7 @@ interface Props {
   onFork: () => void;
   saveStepContext: (turnIndex: number, step: Exclude<AgentStep, "reducer">, messages: ContextMessage[]) => Promise<void>;
   reloadScope: () => Promise<void>;
+  onOpenSettings: (section: SettingsSection) => void; // 「数据源」节点 → 打开对应设置分区
 }
 
 // 线性主轴(不含 options —— options 是 Writer 后与 B 并行的叶子,单独处理)
@@ -57,6 +59,7 @@ type Sel =
 
 function parseSel(id: string | null): Sel {
   if (!id) return null;
+  if (id.startsWith("ds:")) return null; // 数据源节点不进编辑区:它靠自身按钮开设置,无 agent 上下文
   if (id.startsWith("draw:")) {
     const [, i, part] = id.split(":");
     return { kind: "draw", i: Number(i), part: part as "prompt" | "image" };
@@ -256,6 +259,7 @@ export function Workbench(p: Props) {
                 generatingIds={p.generatingIds}
                 selectedId={selId}
                 onSelectNode={setSelId}
+                onOpenSettings={p.onOpenSettings}
               />
               {!isLatest && !isLive && (
                 <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-line bg-surface/90 px-3 py-1 font-mono text-[10.5px] text-ink-faint">

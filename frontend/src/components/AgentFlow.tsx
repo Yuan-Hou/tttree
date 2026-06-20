@@ -8,13 +8,43 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { AgentStep, DrawItem, StepStatus } from "../types";
+import type { AgentStep, DrawItem, SettingsSection, StepStatus } from "../types";
 import { drawNodeStatuses } from "../drawNodeState";
 import { AgentNode, type AgentNodeData } from "./AgentNode";
+import { DataSourceNode, type DataSourceNodeData } from "./DataSourceNode";
 import { clearPositions, loadPositions, savePosition } from "../nodeLayout";
 
-const nodeTypes = { agent: AgentNode };
+const nodeTypes = { agent: AgentNode, datasource: DataSourceNode };
 const DRAG_HANDLE = ".node-drag-handle"; // 与 AgentNode 把手类名对应:只有抓把手才移动节点
+
+// 「数据源」节点:喂给各 agent 的恒定底座。id 用 ds: 前缀(工作台不当 agent 步处理)。
+// targets = 该数据源喂给的 agent 节点 id;按钮 → 故事内设置对应分区。draws 列的写稿节点动态拼接。
+const DATA_SOURCES: {
+  id: string;
+  glyph: string;
+  title: string;
+  subtitle: string;
+  x: number;
+  buttons: { label: string; section: SettingsSection }[];
+  staticTargets: AgentStep[];
+  feedsDraws?: boolean; // 是否连向本轮所有写稿节点(画风/图库喂绘图写稿)
+}[] = [
+  {
+    id: "ds:knowledge", glyph: "📖", title: "知识库", subtitle: "设定圣经 · 只注入导演 A", x: 40,
+    buttons: [{ label: "知识库", section: "knowledge" }], staticTargets: ["director_a"],
+  },
+  {
+    id: "ds:style", glyph: "✒", title: "文风圣经", subtitle: "叙事文风 · 注入 A/写手/B/选项", x: 320,
+    buttons: [{ label: "文风圣经", section: "style" }],
+    staticTargets: ["director_a", "writer", "director_b", "options"],
+  },
+  {
+    id: "ds:visual", glyph: "🎨", title: "画风圣经和图库", subtitle: "绘图风格与参考图 · 注入绘图写稿", x: 1018,
+    buttons: [{ label: "画风圣经", section: "visual" }, { label: "图库", section: "gallery" }],
+    staticTargets: [], feedsDraws: true,
+  },
+];
+const DS_Y = -150; // 数据源行置于 agent 行(y=70)上方
 
 interface Props {
   storyId: string;
@@ -25,6 +55,7 @@ interface Props {
   generatingIds: number[]; // 正在出图的 proposal_id → 绘图节点亮"运行中"(按 proposal_id 索引,跨轮不串)
   selectedId: string | null;
   onSelectNode: (id: string) => void;
+  onOpenSettings: (section: SettingsSection) => void;
 }
 
 const MAIN: { step: AgentStep; glyph: string; title: string; subtitle: string; x: number }[] = [
@@ -41,6 +72,7 @@ interface BuildArgs {
   generatingIds: number[];
   selectedId: string | null;
   onSelectNode: (id: string) => void;
+  onOpenSettings: (section: SettingsSection) => void;
 }
 
 /** 自动布局:每个节点的默认坐标 + 实时 data。手动拖动的坐标在外层覆盖到这之上。 */
@@ -118,6 +150,23 @@ function buildNodes(a: BuildArgs): Node[] {
       } satisfies AgentNodeData,
     });
   });
+
+  // 数据源节点(知识库 / 文风圣经 / 画风圣经和图库):整节点可拖(不设 dragHandle,按钮 nodrag)。
+  DATA_SOURCES.forEach((ds) => {
+    ns.push({
+      id: ds.id,
+      type: "datasource",
+      position: { x: ds.x, y: DS_Y },
+      draggable: true,
+      data: {
+        glyph: ds.glyph,
+        title: ds.title,
+        subtitle: ds.subtitle,
+        buttons: ds.buttons,
+        onOpen: a.onOpenSettings,
+      } satisfies DataSourceNodeData,
+    });
+  });
   return ns;
 }
 
@@ -130,14 +179,15 @@ export function AgentFlow({
   generatingIds,
   selectedId,
   onSelectNode,
+  onOpenSettings,
 }: Props) {
-  const args: BuildArgs = { stages, draws, writingIds, generatingIds, selectedId, onSelectNode };
+  const args: BuildArgs = { stages, draws, writingIds, generatingIds, selectedId, onSelectNode, onOpenSettings };
   const scope = `${storyId}.${turn}`; // 手动布局按 (故事, 轮) 分桶
   // 自动布局(默认坐标 + 实时 data),手动坐标在 effect 中覆盖到其上。
   const computed = useMemo(
     () => buildNodes(args),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [stages, draws, writingIds, generatingIds, selectedId, onSelectNode],
+    [stages, draws, writingIds, generatingIds, selectedId, onSelectNode, onOpenSettings],
   );
 
   // 初始种子:默认坐标叠加本地存的手动坐标(只算一次)→ fitView 首帧就能正确框住,无跳动。
@@ -216,6 +266,14 @@ export function AgentFlow({
         style: edgeStyle(st.img === "running"),
       });
     });
+    // 数据源 → 对应 agent(恒定底座的喂入,非控制流):浅虚线、不动画,与流程边区分。
+    DATA_SOURCES.forEach((ds) => {
+      const targets = [...ds.staticTargets];
+      if (ds.feedsDraws) draws.forEach((_, i) => targets.push(`draw:${i}:prompt` as AgentStep));
+      targets.forEach((target) => {
+        e.push({ id: `${ds.id}->${target}`, source: ds.id, target, animated: false, style: feedEdgeStyle });
+      });
+    });
     return e;
   }, [stages, draws, writingIds, generatingIds]);
 
@@ -255,3 +313,11 @@ const edgeStyle = (active: boolean) => ({
   stroke: active ? "var(--color-accent)" : "var(--color-line-strong)",
   strokeWidth: 1.5,
 });
+
+// 数据源喂入边:浅色虚线,与控制流边区分(数据底座,非流程)。
+const feedEdgeStyle = {
+  stroke: "var(--color-line-strong)",
+  strokeWidth: 1.2,
+  strokeDasharray: "4 4",
+  opacity: 0.6,
+};

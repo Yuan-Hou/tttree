@@ -188,7 +188,7 @@ export function App() {
                   )}
                 </button>
                 <button
-                  onClick={e.openSettings}
+                  onClick={() => e.openSettings()}
                   className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-ink-soft transition hover:border-accent hover:text-accent-ink"
                   title="故事内设置:知识库、参考图库、各 agent 模型(随副本复制、随删除清理)"
                 >
@@ -398,12 +398,18 @@ export function App() {
           onFork={e.doFork}
           saveStepContext={e.saveStepContext}
           reloadScope={e.reloadScope}
+          onOpenSettings={e.openSettings}
         />
       )}
 
-      {/* 故事内设置:知识库 / 图库(模型设置子步四并入)。覆盖层。 */}
+      {/* 故事内设置:模型 / 知识库 / 文风 / 画风 / 图库。覆盖层。可由工作台「数据源」节点带分区直达。 */}
       {e.settingsOpen && e.curId && (
-        <SettingsPanel storyId={e.curId} title={e.title} onClose={e.closeSettings} />
+        <SettingsPanel
+          storyId={e.curId}
+          title={e.title}
+          onClose={e.closeSettings}
+          initialSection={e.settingsSection}
+        />
       )}
     </div>
   );

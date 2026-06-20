@@ -4,6 +4,8 @@ import type {
   ContextMessage,
   Draft,
   DrawEvent,
+  EndpointChange,
+  GlobalSettings,
   LibraryAsset,
   PickedRef,
   ProposalDraw,
@@ -191,7 +193,7 @@ export const getSettings = (id: string) => jget<StorySettings>(`/story/${id}/set
 
 export const saveSettings = (
   id: string,
-  body: { default_model?: string; overrides?: Record<string, string> },
+  body: { default_model?: string; overrides?: Record<string, string>; image_model?: string },
 ) =>
   fetch(`/story/${id}/settings`, { method: "PUT", headers: json, body: JSON.stringify(body) }).then(
     async (r) => {
@@ -199,6 +201,19 @@ export const saveSettings = (
       return r.json() as Promise<StorySettings>;
     },
   );
+
+// ── 全局设置:接入点供应商配置(全站单例,不随故事)──
+export const getGlobalSettings = () => jget<GlobalSettings>(`/global-settings`);
+
+export const saveGlobalSettings = (endpoints: Record<string, EndpointChange>) =>
+  fetch(`/global-settings`, {
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ endpoints }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json() as Promise<GlobalSettings>;
+  });
 
 // ── 故事内设置:知识库(整篇自由文本)──
 export const getKnowledge = (id: string) => jget<{ content: string }>(`/story/${id}/knowledge`);

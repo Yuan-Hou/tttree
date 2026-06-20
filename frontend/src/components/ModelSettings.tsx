@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getSettings, saveSettings } from "../api";
-import type { ModelChoice } from "../types";
+import type { ImageModelChoice, ModelChoice } from "../types";
 import { Button } from "./ui";
 
 /** 可单独选模型的 agent(与后端 StorySettings 的 *_model 列一一对应)。 */
@@ -19,6 +19,8 @@ export function ModelSettings({ storyId }: { storyId: string }) {
   const [models, setModels] = useState<ModelChoice[]>([]);
   const [defaultModel, setDefaultModel] = useState(DEEPSEEK);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [imageModels, setImageModels] = useState<ImageModelChoice[]>([]);
+  const [imageModel, setImageModel] = useState(""); // "" = 用全局默认绘图模型
   const [saved, setSaved] = useState(""); // 已落库快照(判脏)
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -34,7 +36,15 @@ export function ModelSettings({ storyId }: { storyId: string }) {
         setModels(s.models);
         setDefaultModel(s.default_model);
         setOverrides(s.overrides);
-        setSaved(JSON.stringify({ default_model: s.default_model, overrides: s.overrides }));
+        setImageModels(s.image_models);
+        setImageModel(s.image_model);
+        setSaved(
+          JSON.stringify({
+            default_model: s.default_model,
+            overrides: s.overrides,
+            image_model: s.image_model,
+          }),
+        );
       })
       .catch((e) => alive && setErr(String(e)))
       .finally(() => alive && setLoading(false));
@@ -48,7 +58,7 @@ export function ModelSettings({ storyId }: { storyId: string }) {
     return (id: string) => m.get(id) ?? id;
   }, [models]);
 
-  const cur = JSON.stringify({ default_model: defaultModel, overrides });
+  const cur = JSON.stringify({ default_model: defaultModel, overrides, image_model: imageModel });
   const dirty = cur !== saved;
   // 任何 agent 实际生效的是非 deepseek → 提示放弃缓存红利
   const usesNonDeepseek = AGENTS.some((a) => (overrides[a.key] || defaultModel) !== DEEPSEEK);
@@ -57,10 +67,21 @@ export function ModelSettings({ storyId }: { storyId: string }) {
     setBusy(true);
     setErr(null);
     try {
-      const s = await saveSettings(storyId, { default_model: defaultModel, overrides });
+      const s = await saveSettings(storyId, {
+        default_model: defaultModel,
+        overrides,
+        image_model: imageModel,
+      });
       setDefaultModel(s.default_model);
       setOverrides(s.overrides);
-      setSaved(JSON.stringify({ default_model: s.default_model, overrides: s.overrides }));
+      setImageModel(s.image_model);
+      setSaved(
+        JSON.stringify({
+          default_model: s.default_model,
+          overrides: s.overrides,
+          image_model: s.image_model,
+        }),
+      );
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -130,6 +151,28 @@ export function ModelSettings({ storyId }: { storyId: string }) {
             </div>
           );
         })}
+      </div>
+
+      {/* 绘图模型(出图用哪个图像模型;与上面的文本 agent 相互独立) */}
+      <div className="flex items-center gap-3 rounded-xl border border-line bg-paper p-3.5">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] font-medium text-ink">绘图模型</div>
+          <div className="mt-0.5 text-[11.5px] text-ink-faint">
+            出图用哪个图像模型(参考图编辑/变体均支持)。端点与 key 在「全局设置」里配。
+          </div>
+        </div>
+        <select
+          value={imageModel}
+          onChange={(e) => setImageModel(e.target.value)}
+          className="rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-[12.5px] text-ink focus:border-accent focus:outline-none"
+        >
+          <option value="">用全局默认(gpt-image-2)</option>
+          {imageModels.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {usesNonDeepseek && (

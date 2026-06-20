@@ -182,15 +182,46 @@ export interface ModelChoice {
   label: string;
   provider: string;
 }
+export interface ImageModelChoice {
+  id: string;
+  label: string;
+  api: string; // "openai" | "gemini"
+}
 export interface StorySettings {
   default_model: string; // 全局默认模型 id
   overrides: Record<string, string>; // agent → 覆盖模型 id("" = 用全局默认)
   effective: Record<string, string>; // agent → 实际生效模型 id
   models: ModelChoice[]; // 可选模型清单
+  image_model: string; // 绘图模型覆盖("" = 用全局默认绘图模型)
+  image_model_effective: string; // 实际生效绘图模型 id
+  image_models: ImageModelChoice[]; // 可选绘图模型清单
 }
 
 // 故事内设置面板的分区 id(SettingsPanel 左栏)。工作台「数据源」节点据此直达对应分区。
-export type SettingsSection = "model" | "knowledge" | "style" | "visual" | "gallery";
+export type SettingsSection = "model" | "knowledge" | "style" | "visual" | "gallery" | "global";
+
+// ── 全局设置:接入点供应商配置(全站单例)──
+export interface GlobalEndpoint {
+  id: string;
+  label: string;
+  group: string; // 供应商品牌(UI 分组)
+  mode: "site" | "custom";
+  site_base_url: string; // 本站点服务用的默认 URL
+  presets: string[]; // 自定义时的 URL 下拉候选
+  base_url: string; // 当前 URL(custom 回显已存;site 给默认占位)
+  key_set: boolean; // 是否已存自填 key
+  key_masked: string; // 掩码(如 ••••x9);从不回传明文
+}
+export interface GlobalSettings {
+  crypto_available: boolean; // APP_SECRET 是否已配置(决定能否自填 key)
+  endpoints: GlobalEndpoint[];
+}
+// PUT 单个接入点的改动
+export interface EndpointChange {
+  mode: "site" | "custom";
+  base_url?: string;
+  api_key?: string; // 仅 custom 且要改 key 时传
+}
 
 // ── 场景地图(静态,第一版):GET /story/{id}/scene-map ──
 export interface SceneMapGalleryItem {

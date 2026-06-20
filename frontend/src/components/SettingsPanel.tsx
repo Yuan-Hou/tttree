@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { SettingsSection } from "../types";
 import { BibleEditor } from "./BibleEditor";
 import { GalleryEditor } from "./GalleryEditor";
+import { GlobalSettings } from "./GlobalSettings";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { ModelSettings } from "./ModelSettings";
 
@@ -19,6 +20,7 @@ const SECTIONS = [
   { id: "style", label: "文风圣经", hint: "叙事文风 · 可套模板" },
   { id: "visual", label: "画风圣经", hint: "绘图风格 · 可套模板" },
   { id: "gallery", label: "图库", hint: "参考图素材" },
+  { id: "global", label: "全局设置", hint: "供应商接入点 · 全站共享" },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -83,6 +85,8 @@ export function SettingsPanel({ storyId, title, onClose, initialSection }: Props
               <BibleEditor storyId={storyId} kind="style" />
             ) : section === "visual" ? (
               <BibleEditor storyId={storyId} kind="visual" />
+            ) : section === "global" ? (
+              <GlobalSettings />
             ) : (
               <GalleryEditor storyId={storyId} />
             )}

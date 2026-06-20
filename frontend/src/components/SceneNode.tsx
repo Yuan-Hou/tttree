@@ -18,6 +18,11 @@ export interface SceneNodeData {
   [k: string]: unknown;
 }
 
+// React Flow 要求每个边端点节点至少有一对 source/target 句柄,否则 getEdgePosition 返回 null、
+// 边直接不渲染。我们的自定义边(OffsetEdge / SelfLoopEdge)按节点包围盒自算几何、不读句柄坐标,
+// 故这些句柄纯为「满足边渲染前置条件」而存在 → 一律隐形、零尺寸、不可交互、不占视觉。
+const HANDLE_CN = "!h-0 !min-h-0 !w-0 !min-w-0 !border-0 !bg-transparent !opacity-0";
+
 /** 场景地图节点。三态:
  *  - start  虚拟「起点」:故事入口,克制的小圆点+标签,只作首轮实线的源。
  *  - scene  真实场景卡:名字 + 变体翻页 gallery(点击走 lightbox)+ 空图占位;当前场景高亮。
@@ -31,7 +36,7 @@ export function SceneNode({ data }: NodeProps) {
     // 实线从圆心高度出发,和圆对齐。
     return (
       <div className="relative flex h-9 w-9 items-center justify-center rounded-full border border-accent bg-accent-soft font-mono text-[15px] text-accent-ink">
-        <Handle type="source" position={Position.Right} className="!h-1.5 !w-1.5 !border-0 !bg-accent" />
+        <Handle type="source" position={Position.Right} isConnectable={false} className={HANDLE_CN} />
         ✦
         <span className="absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap font-mono text-[10.5px] tracking-wide text-ink-faint">
           起点
@@ -43,8 +48,8 @@ export function SceneNode({ data }: NodeProps) {
   if (d.variant === "ghost") {
     return (
       <div className="flex w-[176px] flex-col rounded-xl border border-dashed border-line bg-paper px-3 py-2.5 opacity-60">
-        <Handle type="target" position={Position.Left} className="!h-1.5 !w-1.5 !border-0 !bg-line-strong" />
-        <Handle type="source" position={Position.Right} className="!h-1.5 !w-1.5 !border-0 !bg-line-strong" />
+        <Handle type="target" position={Position.Left} isConnectable={false} className={HANDLE_CN} />
+        <Handle type="source" position={Position.Right} isConnectable={false} className={HANDLE_CN} />
         <span className="font-serif text-[13px] text-ink-soft">{d.name}</span>
         <span className="mt-0.5 font-mono text-[10px] text-ink-faint">已不在最新黑板</span>
       </div>
@@ -85,8 +90,8 @@ function SceneCard({ d }: { d: SceneNodeData }) {
       title={images.length ? "双击看大图(可翻变体)· 拖动可挪位" : "拖动可挪位"}
       className={`flex w-[208px] flex-col overflow-hidden rounded-xl border bg-surface shadow-[0_1px_2px_rgba(28,37,48,0.05)] transition-shadow ${ring}`}
     >
-      <Handle type="target" position={Position.Left} className="!h-1.5 !w-1.5 !border-0 !bg-line-strong" />
-      <Handle type="source" position={Position.Right} className="!h-1.5 !w-1.5 !border-0 !bg-line-strong" />
+      <Handle type="target" position={Position.Left} isConnectable={false} className={HANDLE_CN} />
+      <Handle type="source" position={Position.Right} isConnectable={false} className={HANDLE_CN} />
 
       {/* 变体 gallery / 空图占位 */}
       <div className="relative aspect-[4/3] w-full bg-sunken">

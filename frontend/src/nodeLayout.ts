@@ -40,6 +40,21 @@ export function savePosition(scope: string, nodeId: string, pos: Pos): void {
   }
 }
 
+/** 批量写入/覆盖某 scope 的坐标(整体重排布局用):合并进现有桶、逐节点覆盖,一次 localStorage 写入。 */
+export function savePositions(scope: string, positions: NodePositions): void {
+  try {
+    const cur = loadPositions(scope);
+    for (const [id, v] of Object.entries(positions)) {
+      if (v && typeof v.x === "number" && typeof v.y === "number") {
+        cur[id] = { x: Math.round(v.x), y: Math.round(v.y) };
+      }
+    }
+    localStorage.setItem(bucketKey(scope), JSON.stringify(cur));
+  } catch {
+    /* 配额满 / 禁用 → 忽略,这只是本地偏好 */
+  }
+}
+
 /** 批量种入某 scope 的坐标(导出查看器用):仅当该 scope 尚无任何坐标时写入,
  *  这样导出文件首次打开即按作者整理好的布局落位,而读者之后自己拖动的结果会照常保留、不被覆盖。 */
 export function seedPositions(scope: string, positions: NodePositions): void {

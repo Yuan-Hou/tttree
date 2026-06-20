@@ -13,12 +13,21 @@ import {
 import "@xyflow/react/dist/style.css";
 import { getSceneMap } from "../api";
 import type { SceneMap as SceneMapData } from "../types";
-import { clearPositions, loadPositions, savePosition } from "../nodeLayout";
+import { clearPositions, loadPositions, savePosition, savePositions } from "../nodeLayout";
+import { compactLayout } from "../forceLayout";
 import { SceneNode, type SceneNodeData } from "./SceneNode";
 import { SelfLoopEdge } from "./SelfLoopEdge";
+import { OffsetEdge } from "./OffsetEdge";
 
 const nodeTypes = { scene: SceneNode };
-const edgeTypes = { selfloop: SelfLoopEdge };
+const edgeTypes = { selfloop: SelfLoopEdge, offset: OffsetEdge };
+
+// 各形态节点的估算尺寸(紧凑布局去重叠用;与 SceneNode 渲染大小对齐)。
+const NODE_SIZE: Record<string, { w: number; h: number }> = {
+  scene: { w: 208, h: 196 },
+  ghost: { w: 176, h: 60 },
+  start: { w: 36, h: 36 },
+};
 
 const NODE_W = 208; // 与 SceneNode 卡片宽度一致
 const ROW_H = 260; // 行距:留足竖直呼吸位 + 自环弧线不压上方节点
@@ -323,13 +332,28 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
     [scope],
   );
 
-  // 重置:清掉本故事地图的手动坐标,各场景回到自动布局默认位。
+  // 重置:清掉本故事地图的手动坐标,各场景回到从左到右的时间线布局默认位。
   const resetLayout = useCallback(() => {
     clearPositions(scope);
     const def = new Map(computed.map((n) => [n.id, n.position]));
     setNodes((prev) => prev.map((n) => ({ ...n, position: def.get(n.id) ?? n.position })));
     setHasOverrides(false);
   }, [scope, computed, setNodes]);
+
+  // 紧凑布局:按连接关系力导向排成自然紧凑的一团(从时间线默认位起算 → 结果稳定可复现),
+  // 落位后作为本故事地图的手动坐标存下(之后仍可逐个微调;「时间线」按钮可清回默认)。
+  const applyCompactLayout = useCallback(() => {
+    const seed = computed.map((n) => {
+      const sz = NODE_SIZE[(n.data as SceneNodeData).variant] ?? NODE_SIZE.scene;
+      return { id: n.id, x: n.position.x, y: n.position.y, w: sz.w, h: sz.h };
+    });
+    const links = base.edges.filter((e) => e.source !== e.target).map((e) => ({ a: e.source, b: e.target }));
+    const layout = compactLayout(seed, links);
+    if (layout.size === 0) return;
+    setNodes((prev) => prev.map((n) => ({ ...n, position: layout.get(n.id) ?? n.position })));
+    savePositions(scope, Object.fromEntries(layout));
+    setHasOverrides(true);
+  }, [computed, base.edges, scope, setNodes]);
 
   const onEdgeClick = useCallback(
     (_: unknown, edge: Edge) => {
@@ -398,40 +422,47 @@ export function SceneMap({ storyId, onJumpToTurn, refreshKey, focusReq }: Props)
             <Controls showInteractive={false} className="!shadow-none" />
           </ReactFlow>
         )}
-        {hasOverrides && data && data.nodes.length > 0 && (
-          <button
-            type="button"
-            onClick={resetLayout}
-            title="清掉本故事地图拖动过的节点位置,回到自动布局"
-            className="absolute bottom-3 right-3 z-10 rounded-full border border-line-strong bg-surface/95 px-3 py-1 font-mono text-[10.5px] text-ink-soft shadow-sm transition hover:bg-sunken"
-          >
-            ↺ 重置布局
-          </button>
+        {data && data.nodes.length > 0 && (
+          <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={applyCompactLayout}
+              title="按连接关系自动排成紧凑布局(之后仍可手动微调)"
+              className="rounded-full border border-line-strong bg-surface/95 px-3 py-1 font-mono text-[10.5px] text-ink-soft shadow-sm transition hover:bg-sunken"
+            >
+              ❖ 紧凑排布
+            </button>
+            {hasOverrides && (
+              <button
+                type="button"
+                onClick={resetLayout}
+                title="清掉本故事地图拖动/重排过的节点位置,回到从左到右的时间线布局"
+                className="rounded-full border border-line-strong bg-surface/95 px-3 py-1 font-mono text-[10.5px] text-ink-soft shadow-sm transition hover:bg-sunken"
+              >
+                ↺ 时间线
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-/** 悬停某实线时:该实线高亮(加粗+墨绿+箭头变色),其余实线降调(opacity 降低);虚线不受影响。 */
+/** 悬停某实线时:只把该实线提上来强调(加粗 + 墨绿 + 箭头变色 + 置顶),其余边一概不动
+ *  —— 不再把别的连线虚化降调。 */
 function decorateEdges(edges: Edge[], hoverId: string | null): Edge[] {
   if (!hoverId) return edges;
   return edges.map((e) => {
+    if (e.id !== hoverId) return e; // 其余边保持原样,不降调
     const isSolid = (e.data as { turnIndex?: number } | undefined)?.turnIndex != null;
-    if (!isSolid) return e; // 虚线不参与高亮/降调
-    if (e.id === hoverId) {
-      return {
-        ...e,
-        style: { ...e.style, stroke: "var(--color-accent)", strokeWidth: 2.6, opacity: 1 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--color-accent)", width: 18, height: 18 },
-        labelStyle: { ...(e.labelStyle as object), fill: "var(--color-accent-ink)" },
-        zIndex: 10,
-      };
-    }
+    if (!isSolid) return e; // 虚线不参与高亮
     return {
       ...e,
-      style: { ...e.style, opacity: 0.16 },
-      labelStyle: { ...(e.labelStyle as object), opacity: 0.25 },
+      style: { ...e.style, stroke: "var(--color-accent)", strokeWidth: 3, opacity: 1 },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "var(--color-accent)", width: 18, height: 18 },
+      labelStyle: { ...(e.labelStyle as object), fill: "var(--color-accent-ink)" },
+      zIndex: 10,
     };
   });
 }
@@ -546,33 +577,36 @@ function buildGraph(data: SceneMapData | null): { nodes: Node[]; edges: Edge[] }
   // ── 边 ──
   // 自环(起点=终点:这一轮停留在同一场景)走自定义 selfloop 边,画成节点顶上的弧线 + 回落箭头,
   // 而非默认边那条横穿画布的直线。自定义边不自动渲染内置 label,故标签文本走 label prop、由组件自绘。
+  // 同一节点的多个自环:按出现顺序编号(loopIndex)+ 总数(loopCount),交给 SelfLoopEdge
+  // 沿节点四周整圈均分成花瓣。自环标签走紧凑「第N拍」(beat 略去),免得一圈花瓣的标签互相压。
+  const loopTotal: Record<string, number> = {};
+  for (const e of data.solid_edges) if (e.from === e.to) loopTotal[e.from] = (loopTotal[e.from] ?? 0) + 1;
+  const loopSeen: Record<string, number> = {};
   const solid: Edge[] = data.solid_edges.map((e, i) => {
     const labelText = e.beat ? `第${e.turn_index}拍 · ${e.beat}` : `第${e.turn_index}拍`;
     if (e.from === e.to) {
+      const loopIndex = loopSeen[e.from] ?? 0;
+      loopSeen[e.from] = loopIndex + 1;
       return {
         id: `s${i}`,
         source: e.from,
         target: e.to,
         type: "selfloop",
-        data: { turnIndex: e.turn_index }, // 实线判别 + 点击跳转目标(悬停/点击沿用)
-        label: labelText,
+        data: { turnIndex: e.turn_index, loopIndex, loopCount: loopTotal[e.from] }, // 实线判别 + 跳转 + 花瓣定位
+        label: `第${e.turn_index}拍`,
         markerEnd: { type: MarkerType.ArrowClosed, color: "#9aa4b0", width: 16, height: 16 },
-        style: { stroke: "var(--color-line-strong)", strokeWidth: 1.4, cursor: "pointer" },
+        style: { stroke: "var(--color-ink-faint)", strokeWidth: 1.8, cursor: "pointer" },
       };
     }
     return {
       id: `s${i}`,
       source: e.from,
       target: e.to,
-      data: { turnIndex: e.turn_index }, // 实线判别 + 点击跳转目标
+      data: { turnIndex: e.turn_index }, // 实线判别 + 点击跳转目标(offset 由分组统一补)
       label: labelText,
-      labelStyle: { fontSize: 10, fill: "var(--color-ink-soft)" },
-      labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.9 },
-      labelBgPadding: [4, 2] as [number, number],
-      labelBgBorderRadius: 4,
-      type: "default",
+      type: "offset",
       markerEnd: { type: MarkerType.ArrowClosed, color: "#9aa4b0", width: 16, height: 16 },
-      style: { stroke: "var(--color-line-strong)", strokeWidth: 1.4, cursor: "pointer" },
+      style: { stroke: "var(--color-ink-faint)", strokeWidth: 1.8, cursor: "pointer" },
     };
   });
 
@@ -581,10 +615,27 @@ function buildGraph(data: SceneMapData | null): { nodes: Node[]; edges: Edge[] }
     id: `d-${e.a}-${e.b}`,
     source: e.a,
     target: e.b,
-    type: "default",
+    type: "offset",
     selectable: false,
-    style: { stroke: "var(--color-line-strong)", strokeWidth: 1.1, strokeDasharray: "5 4", opacity: 0.7 },
+    style: { stroke: "var(--color-ink-faint)", strokeWidth: 1.4, strokeDasharray: "6 5", opacity: 0.55 },
   }));
+
+  // 平行边错开:把同一对节点(无向)间的所有非自环边(实线/虚线/多重转移)按法向均匀分到两侧。
+  // 单边组 → offset=0(等同直线,无变化);≥2 条 → 对称分散,连同各自标签一起分开。
+  const SPACING = 26;
+  const groups = new Map<string, Edge[]>();
+  for (const e of [...solid.filter((x) => x.source !== x.target), ...dashed]) {
+    const key = e.source < e.target ? `${e.source} ${e.target}` : `${e.target} ${e.source}`;
+    const g = groups.get(key);
+    if (g) g.push(e);
+    else groups.set(key, [e]);
+  }
+  for (const g of groups.values()) {
+    g.sort((a, b) => a.id.localeCompare(b.id)); // 稳定分配,避免每次重排抖动
+    g.forEach((e, i) => {
+      e.data = { ...(e.data as object), offset: (i - (g.length - 1) / 2) * SPACING };
+    });
+  }
 
   return { nodes, edges: [...dashed, ...solid] };
 }

@@ -26,6 +26,7 @@ interface Props {
   latestTurn: number | null;
   liveStages: LiveStages | null;
   liveTurn: number | null;
+  liveOutputs: Partial<Record<AgentStep, string>>; // 各 agent 进行中的实时原始输出(逐 token)
   turnStreaming: boolean;
   retrying: AgentStep | null;
   contextsVersion: number;
@@ -84,6 +85,10 @@ export function Workbench(p: Props) {
 
   const effTurn = p.scopeTurn ?? p.latestTurn;
   const isLive = p.liveStages !== null && p.liveTurn === effTurn;
+  // 本轮是否已落盘:新提交看的是 latest+1(未落盘);重试看的是 latest(已落盘,只是 agent 在重走)。
+  // 据此区分「进行中且无落盘绘图支流」(只新提交满足)与「重试(绘图支流仍取落盘那份)」。
+  const turnPersisted = effTurn != null && effTurn <= (p.latestTurn ?? -1);
+  const liveUnpersisted = isLive && !turnPersisted; // 仅新提交:提案未落库,用实时提案预览
   // 「失败的提交」视图:有失败详情、非进行中/重走中,且当前停在比最新已落盘轮更靠后的那一格
   // (= 失败尝试 latestTurn+1)。这一格不是真实落盘轮,故没有上下文/绘图,也不能回退/重试。
   const failedView =
@@ -91,25 +96,14 @@ export function Workbench(p: Props) {
   const isLatest = effTurn != null && effTurn === p.latestTurn;
   const idle = !p.turnStreaming && p.retrying === null;
   const editable = isLatest && idle && !isLive && !failedView;
-  const noPersisted = isLive || failedView; // 无落盘上下文 / 绘图支流
+  const noPersisted = isLive || failedView; // 无落盘上下文(进行中/重试都看实时输出,不取存档输入)
+  const drawsSkip = liveUnpersisted || failedView; // 绘图支流:仅新提交(未落库)/失败提交 不取落盘
 
-  // 节点状态:进行中→实时点亮;重走中→切入点起亮;失败→失败步 error、其后 pending;否则静态全完成。
+  // 节点状态:进行中/重走中→实时点亮(两者都走 liveStages);失败→失败步 error、其后 pending;否则静态全完成。
+  // 重试也驱动 liveStages + liveTurn(见 useStoryEngine.doRetry),故同样落在 isLive 分支,无需单列重走逻辑。
   let stages: LiveStages = ALL_DONE;
   if (isLive && p.liveStages) stages = p.liveStages;
-  else if (p.retrying && isLatest) {
-    if (p.retrying === "options") {
-      // 叶子自重试:只 options 转"运行中",主轴保持全完成
-      stages = { ...ALL_DONE, options: "running" };
-    } else {
-      const from = ORDER.indexOf(p.retrying);
-      stages = ORDER.reduce((acc, s, i) => {
-        acc[s] = (i >= from ? "running" : "done") as StepStatus;
-        return acc;
-      }, {} as LiveStages);
-      // 上游(A/Writer)重走 → 连带重跑 Options;B 重走则 Options 保留(done)
-      stages.options = p.retrying === "director_a" || p.retrying === "writer" ? "running" : "done";
-    }
-  } else if (failedView && p.liveError) {
+  else if (failedView && p.liveError) {
     const fi = ORDER.indexOf(p.liveError.step);
     stages = ORDER.reduce((acc, s, i) => {
       acc[s] = (i < fi ? "done" : i === fi ? "error" : "pending") as StepStatus;
@@ -123,13 +117,14 @@ export function Workbench(p: Props) {
 
   // 绘图支流:进行中的轮用本轮的实时提案;否则用落盘后取回的 draws。
   const drawItems: DrawItem[] = useMemo(() => {
-    // live 轮:提案尚未落库 → 无 proposal_id,只作"待绘制"预览,出图等落库后(turn_done 刷新)。
-    if (isLive)
+    // 新提交进行中:提案尚未落库 → 无 proposal_id,只作"待绘制"预览,出图等落库后(turn_done 刷新)。
+    // 重试不属此列(turn 已落盘)→ 仍用取回的落盘 draws。
+    if (liveUnpersisted)
       return p.proposals.map((pr, i) => ({
         key: `lp${i}`, scene_slug: pr.scene_slug, kind: pr.kind, reason: pr.reason, status: "pending" as const,
       }));
     return draws ? toDrawItems(draws) : [];
-  }, [isLive, p.proposals, draws]);
+  }, [liveUnpersisted, p.proposals, draws]);
 
   const liveNarrative = p.turns.find((t) => t.turn_index === effTurn)?.narrative ?? "";
 
@@ -161,7 +156,7 @@ export function Workbench(p: Props) {
   // 同轮内的 drawsVersion 刷新不清空,避免无谓闪烁。
   const prevDrawsKey = useRef<string | null>(null);
   useEffect(() => {
-    if (effTurn == null || noPersisted) {
+    if (effTurn == null || drawsSkip) {
       setDraws(null);
       return;
     }
@@ -175,7 +170,7 @@ export function Workbench(p: Props) {
     return () => {
       alive = false;
     };
-  }, [p.storyId, effTurn, noPersisted, p.drawsVersion]);
+  }, [p.storyId, effTurn, drawsSkip, p.drawsVersion]);
 
   const sel = parseSel(selId);
   // 在对应节点展示失败详情:失败的提交(failedView)整体,或在最新正常轮上「从这里重试」失败时
@@ -281,6 +276,7 @@ export function Workbench(p: Props) {
                   loading={loading}
                   live={isLive}
                   liveNarrative={liveNarrative}
+                  liveOutput={sel.step !== "reducer" ? p.liveOutputs[sel.step] : undefined}
                   editable={editable}
                   retrying={p.retrying !== null}
                   error={showNodeError && p.liveError?.step === sel.step ? p.liveError.reason : undefined}

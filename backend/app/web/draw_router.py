@@ -30,7 +30,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.reference_store import list_references
-from app.db.models import Blackboard, DrawProposal, ImageGen, Story, Turn
+from app.db.models import DrawProposal, ImageGen, Story, Turn
 from app.db.session import async_session
 from app.imaging.draw_service import (
     DraftBundle,
@@ -45,7 +45,8 @@ from app.models.schemas import ReferenceRef
 from app.storage import BACKEND_ROOT
 from app.stories.store import touch_story
 from app.turns.draw_proposals import get_proposal, kind_for, mark_proposal_done
-from app.web.sse import SSE_HEADERS, sse
+from app.web.jobs import start_draw_job
+from app.web.sse import sse
 
 router = APIRouter(prefix="/story", tags=["draw"])
 
@@ -308,10 +309,12 @@ async def post_confirm(story_id: str, req: ConfirmReq):
 
     if req.decision == "confirm":
         request_id = uuid.uuid4().hex
-        return StreamingResponse(
+        # 出图作为后台绘图作业:刷新/关页不取消 → gpt-image-2 出的图照常落盘(不浪费已花的钱)。
+        return start_draw_job(
+            story_id,
+            f"confirm:{req.draft_id}",
             _confirm_events(pending, final_prompt, request_id, resolved),
-            media_type="text/event-stream",
-            headers=SSE_HEADERS,
+            meta={"kind": "confirm", "scene": pending.bundle.scene_slug},
         )
 
     if req.decision in {"reuse", "skip"}:  # 不花钱,同步返回
@@ -488,10 +491,12 @@ async def post_picture(story_id: str, proposal_id: int, req: PictureReq) -> Stre
     """画图节点(重)出图:用当前提示词 + 用户自由选择的参考图调 gpt-image-2。短命 SSE。
     确认闸门:execute_image 仅经此显式出图路径触达,编辑参考图不开旁路。"""
     request_id = uuid.uuid4().hex
-    return StreamingResponse(
+    # 出图作为后台绘图作业:刷新/关页不取消 → 出的图照常落盘(不浪费已花的钱)。
+    return start_draw_job(
+        story_id,
+        f"picture:{proposal_id}",
         _picture_events(story_id, proposal_id, req.prompt, req.references, request_id),
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
+        meta={"kind": "picture", "proposal_id": proposal_id},
     )
 
 

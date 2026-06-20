@@ -4,6 +4,9 @@
 - chat_json(model, messages) -> str:产 JSON 的一次性调用,返回助手原始文本(调用方再容错解析)。
   OpenAI 兼容走 response_format={"type":"json_object"};Anthropic 无此字段,靠 prompt 强约束。
 - chat_stream(model, messages) -> AsyncIterator[str]:流式纯文本(Writer 用)。
+- chat_json_stream(model, messages) -> AsyncIterator[str]:逐 token 流式产 JSON(导演 A/B/选项 用),
+  与 chat_json 同样的 JSON 约束(OpenAI 兼容带 response_format,Anthropic 靠 prompt),但开 stream;
+  调用方累积全文后再 loads_lenient(绝不在半截 JSON 上解析)。Anthropic 侧与 chat_stream 等价。
 
 Anthropic 适配三处差异:① system 从 messages 提到顶层 system 参数;② user/assistant 必须严格
 交替且首条为 user(合并相邻同角色、必要时补一条 user 起手);③ 流式走 messages.stream 的
@@ -69,6 +72,31 @@ async def chat_stream(model: str | None, messages: list[dict]) -> AsyncIterator[
 
     client, name = resolve_chat(model)
     stream = await client.chat.completions.create(model=name, messages=messages, stream=True)
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
+async def chat_json_stream(model: str | None, messages: list[dict]) -> AsyncIterator[str]:
+    """逐 token 流式产 JSON(JSON 约束同 chat_json,但开流)。调用方累积全文后再解析。"""
+    if provider_of(model) == ANTHROPIC_PROVIDER:
+        # Anthropic 无 response_format,JSON 靠 prompt 约束 → 与 chat_stream 的 Anthropic 路径一致。
+        client, name = resolve_anthropic(model)
+        system, convo = _to_anthropic(messages)
+        async with client.messages.stream(
+            model=name, system=system, messages=convo, max_tokens=ANTHROPIC_MAX_TOKENS
+        ) as stream:
+            async for text in stream.text_stream:
+                yield text
+        return
+
+    client, name = resolve_chat(model)
+    stream = await client.chat.completions.create(
+        model=name, messages=messages, response_format={"type": "json_object"}, stream=True
+    )
     async for chunk in stream:
         if not chunk.choices:
             continue

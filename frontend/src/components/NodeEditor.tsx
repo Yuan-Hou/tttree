@@ -8,6 +8,7 @@ interface Props {
   loading: boolean;
   live: boolean;
   liveNarrative: string;
+  liveOutput?: string; // 进行中该 agent 逐 token 流入的原始输出(A/B/选项是原始 JSON;写手走 liveNarrative)
   editable: boolean; // 最新轮 && 非进行中 && 非重走中
   retrying: boolean;
   error?: string; // 该步最近一次调用失败的详情(LLM 报错)→ 节点里展示
@@ -51,22 +52,31 @@ export function NodeEditor(p: Props) {
       </Shell>
     );
 
-  if (p.live)
+  if (p.live) {
+    // 进行中:写手逐 token 显示成稿;A/B/选项逐 token 显示原始 JSON。输入记录待落盘后才可查看/编辑。
+    const liveText = step === "writer" ? p.liveNarrative : p.liveOutput ?? "";
     return (
       <Shell title={TITLE[step]} note="本轮进行中,完整输入记录落盘后才可查看/编辑。" error={p.error}>
-        {step === "writer" && p.liveNarrative ? (
+        {liveText ? (
           <>
-            <Label>实时成稿</Label>
-            <div className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-ink">
-              {p.liveNarrative}
+            <Label>{step === "writer" ? "实时成稿" : "实时输出 · 原始 JSON(逐 token)"}</Label>
+            <div
+              className={
+                step === "writer"
+                  ? "whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-ink"
+                  : "whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-ink"
+              }
+            >
+              {liveText}
               <span className="caret" />
             </div>
           </>
         ) : (
-          <LiveNote>本回合 {TITLE[step]} 完成后,这里可看到喂给它的完整输入并就地编辑。</LiveNote>
+          <LiveNote>本回合 {TITLE[step]} 开始后,这里会逐 token 显示它的实时输出。</LiveNote>
         )}
       </Shell>
     );
+  }
 
   if (p.loading) return <Shell title={TITLE[step]} error={p.error}><Dim /></Shell>;
   if (!sc) return <Shell title={TITLE[step]} error={p.error}><Dim /></Shell>;

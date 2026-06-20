@@ -62,6 +62,12 @@ export interface TurnView {
   error?: string;
 }
 
+/** 活跃作业状态(GET /story/{id}/active):重新加载后据此恢复「进行中」并轮询。 */
+export interface ActiveStatus {
+  turn: { active: true; kind: "turn" | "retry"; user_input?: string; entry?: string } | null;
+  draws: { key: string; kind: string; scene?: string; proposal_id?: number }[];
+}
+
 export interface Snapshot {
   story_id: string;
   title: string;
@@ -265,15 +271,42 @@ export interface DrawItem {
 }
 
 // ── 文本线 SSE 事件 ──
+// 四个 agent 都逐 token 流原始输出:写手是叙事文本(narrative_token),A/B/选项是原始 JSON
+// (director_a_token / director_b_token / options_token,供工作台对应节点实时滚动显示)。
 export type TurnEvent =
   | { type: "turn_started"; turn_index: number }
+  | { type: "director_a_token"; text: string }
   | { type: "narrative_token"; text: string }
   | { type: "narrative_done"; full_narrative: string }
+  | { type: "director_b_token"; text: string }
+  | { type: "options_token"; text: string }
   | { type: "state_updated"; blackboard: Blackboard; beat_title: string }
   | { type: "draw_proposed"; proposals: DrawProposal[] }
   | { type: "options_proposed"; options: string[] }
   | { type: "options_failed"; reason: string }
   | { type: "turn_done" }
+  | { type: "error"; reason: string };
+
+// ── 重试线 SSE 事件(POST /retry,与文本线同构 + retry_started/retry_done 收尾)──
+export type RetryEvent =
+  | { type: "retry_started"; entry: AgentStep; turn_index: number }
+  | { type: "director_a_token"; text: string }
+  | { type: "narrative_token"; text: string }
+  | { type: "narrative_done"; full_narrative: string }
+  | { type: "director_b_token"; text: string }
+  | { type: "options_token"; text: string }
+  | { type: "options_proposed"; options: string[] }
+  | { type: "options_failed"; reason: string }
+  | { type: "state_updated"; blackboard: Blackboard; beat_title: string }
+  | {
+      type: "retry_done";
+      entry: AgentStep;
+      turn_index: number;
+      narrative: string;
+      blackboard: Blackboard;
+      invalidated_scene_slugs: string[];
+      new_scene_slugs: string[];
+    }
   | { type: "error"; reason: string };
 
 // ── 图片线 confirm SSE 事件 ──

@@ -49,9 +49,10 @@ async def turn_env(tmp_path, monkeypatch):
 
     state: dict = {"options_delay": 0.0, "options_raise": False, "b_order": [], "o_order": []}
 
+    # 流式桩:逐 token 产原始 JSON / 文本(编排层累积后解析)。
     async def fake_director(*a, **k):
         from app.models.schemas import DirectorOutput
-        return DirectorOutput(situation="s", beat_points=["b"], writing_brief="brief", tips=["白子爱用敬语"])
+        yield DirectorOutput(situation="s", beat_points=["b"], writing_brief="brief", tips=["白子爱用敬语"]).model_dump_json()
 
     async def fake_writer(*a, **k):
         for ch in "一段叙事":
@@ -59,20 +60,20 @@ async def turn_env(tmp_path, monkeypatch):
 
     async def fake_review(*a, **k):
         state["b_order"].append("done")
-        return _bb()
+        yield json.dumps(_bb(), ensure_ascii=False)
 
     async def fake_options(*a, **k):
         await asyncio.sleep(state["options_delay"])
         state["o_order"].append("done")
         if state["options_raise"]:
             from app.agents.options import OptionsError
-            raise OptionsError("boom", raw="{}")
-        return OptionsOutput(options=["往前走", "退回去"])
+            raise OptionsError("boom", raw="{}")  # 生成器内抛 → merge 捕获为 options_failed,不阻断
+        yield OptionsOutput(options=["往前走", "退回去"]).model_dump_json()
 
-    monkeypatch.setattr("app.web.turn_router.run_director", fake_director)
+    monkeypatch.setattr("app.web.turn_router.stream_director", fake_director)
     monkeypatch.setattr("app.web.turn_router.stream_writer", fake_writer)
-    monkeypatch.setattr("app.web.turn_router.run_director_review", fake_review)
-    monkeypatch.setattr("app.web.turn_router.run_options", fake_options)
+    monkeypatch.setattr("app.web.turn_router.stream_director_review", fake_review)
+    monkeypatch.setattr("app.web.turn_router.stream_options", fake_options)
 
     from app.main import app
     transport = httpx.ASGITransport(app=app)

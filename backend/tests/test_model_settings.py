@@ -143,9 +143,10 @@ async def turn_env(tmp_path, monkeypatch):
 
     seen: dict[str, str] = {}
 
+    # 流式桩:四个 agent 都逐 token 产原始 JSON / 文本,编排层累积后解析。捕获各自收到的 model。
     async def fake_director(*a, model=None, **k):
         seen["director_a"] = model
-        return DirectorOutput(situation="s", beat_points=["b"], mood="m", writing_brief="brief")
+        yield DirectorOutput(situation="s", beat_points=["b"], mood="m", writing_brief="brief").model_dump_json()
 
     async def fake_writer(*a, model=None, **k):
         seen["writer"] = model
@@ -154,17 +155,17 @@ async def turn_env(tmp_path, monkeypatch):
 
     async def fake_review(*a, model=None, **k):
         seen["director_b"] = model
-        return _bb()  # 合法黑板 → reduce 正常落库,证明切模型后 JSON 路径仍可靠
+        yield json.dumps(_bb(), ensure_ascii=False)  # 合法黑板 → reduce 正常落库,证明切模型后 JSON 路径仍可靠
 
     async def fake_options(*a, model=None, **k):
         seen["options"] = model
         from app.models.schemas import OptionsOutput
-        return OptionsOutput(options=["往前走", "退回去"])
+        yield OptionsOutput(options=["往前走", "退回去"]).model_dump_json()
 
-    monkeypatch.setattr("app.web.turn_router.run_director", fake_director)
+    monkeypatch.setattr("app.web.turn_router.stream_director", fake_director)
     monkeypatch.setattr("app.web.turn_router.stream_writer", fake_writer)
-    monkeypatch.setattr("app.web.turn_router.run_director_review", fake_review)
-    monkeypatch.setattr("app.web.turn_router.run_options", fake_options)
+    monkeypatch.setattr("app.web.turn_router.stream_director_review", fake_review)
+    monkeypatch.setattr("app.web.turn_router.stream_options", fake_options)
 
     from app.main import app
 

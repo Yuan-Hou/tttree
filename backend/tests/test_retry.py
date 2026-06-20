@@ -9,7 +9,7 @@ from app.imaging.pipeline import record_generation
 from app.models.schemas import DirectorOutput, OptionsOutput
 from app.state.reducer import reduce_turn
 from app.stories.store import create_story
-from app.turns.retry import retry_turn
+from app.turns.retry import retry_turn, stream_retry_turn
 
 
 def _scene(name, image_paths=None):
@@ -28,12 +28,12 @@ async def _setup(tmp_path):
     return make_session_factory(engine)
 
 
-# ---- monkeypatch 帮手:把三个 agent 换成确定性输出(真 LLM 留给验证脚本)----
+# ---- monkeypatch 帮手:把四个 agent 换成确定性「流式」桩(逐 token 产原始 JSON / 文本;真 LLM 留给验证脚本)----
 def _patch_director(mp, a_out, rec):
     async def fake(*a, **k):
         rec.append("A")
-        return a_out
-    mp.setattr("app.turns.retry.run_director", fake)
+        yield a_out.model_dump_json()
+    mp.setattr("app.turns.retry.stream_director", fake)
 
 
 def _patch_writer(mp, text, rec):
@@ -47,15 +47,15 @@ def _patch_writer(mp, text, rec):
 def _patch_review(mp, bb_out, rec):
     async def fake(*a, **k):
         rec.append("B")
-        return bb_out
-    mp.setattr("app.turns.retry.run_director_review", fake)
+        yield json.dumps(bb_out, ensure_ascii=False)
+    mp.setattr("app.turns.retry.stream_director_review", fake)
 
 
 def _patch_options(mp, opts_out, rec):
     async def fake(*a, **k):
         rec.append("O")
-        return opts_out
-    mp.setattr("app.turns.retry.run_options", fake)
+        yield opts_out.model_dump_json()
+    mp.setattr("app.turns.retry.stream_options", fake)
 
 
 A_ORIG = DirectorOutput(situation="在房间,准备下探", beat_points=["下楼梯", "进地窖"],
@@ -222,3 +222,64 @@ async def test_retry_from_options_leaf_only(tmp_path, monkeypatch):
     assert json.loads(t2.director_b_messages) == b_msgs
     assert await _bb_now(Session, sid) == bb_before  # 黑板逐字节不变
     assert r.invalidated_scene_slugs == [] and r.new_scene_slugs == []
+
+
+# ── 流式重试:逐 token 事件 + 失败安全(DB 不变,可恢复)──────────────
+async def test_stream_retry_writer_emits_tokens_then_done(tmp_path, monkeypatch):
+    """从 Writer 前流式重试:依次产出 narrative_token / director_b_token / options_token,
+    最后 state_updated + retry_done;新叙事由逐 token 累积而成。"""
+    Session = await _setup(tmp_path)
+    sid, *_ = await _seed(Session)
+    rec = []
+    _patch_writer(monkeypatch, "你转身上楼。", rec)
+    _patch_review(monkeypatch, json.loads(_bb({"room": _scene("房间"), "attic": _scene("阁楼")}, "attic")), rec)
+    _patch_options(monkeypatch, OptionsOutput(options=["进阁楼"]), rec)
+
+    evs = []
+    async with Session() as s:
+        async for ev in stream_retry_turn(s, sid, "writer"):
+            evs.append(ev)
+    types = [e["type"] for e in evs]
+    assert types[0] == "retry_started"
+    # 逐 token:写手成稿由 narrative_token 累积;B、Options 各有 token 事件
+    narrative = "".join(e["text"] for e in evs if e["type"] == "narrative_token")
+    assert narrative == "你转身上楼。"
+    assert any(e["type"] == "director_b_token" for e in evs)
+    assert any(e["type"] == "options_token" for e in evs)
+    assert any(e["type"] == "options_proposed" and e["options"] == ["进阁楼"] for e in evs)
+    # 收尾:state_updated 在 retry_done 之前
+    assert types.index("state_updated") < types.index("retry_done")
+    done = next(e for e in evs if e["type"] == "retry_done")
+    assert done["narrative"] == "你转身上楼。" and done["new_scene_slugs"] == ["attic"]
+    # 真落盘
+    t2 = await _turn2(Session, sid)
+    assert t2.narrative == "你转身上楼。"
+
+
+async def test_stream_retry_writer_failure_leaves_turn_intact(tmp_path, monkeypatch):
+    """重试中途写手失败 → 只产 error,DB 完全不变(原叙事/黑板/选项都在),前端据此恢复。"""
+    Session = await _setup(tmp_path)
+    sid, _, _, o_msgs = await _seed(Session)
+    bb_before = await _bb_now(Session, sid)
+
+    async def boom_writer(*a, **k):
+        yield "半截"  # 先吐一点,再炸 —— 模拟流到一半失败
+        raise RuntimeError("writer LLM down")
+
+    monkeypatch.setattr("app.turns.retry.stream_writer", boom_writer)
+    # B / Options 不应被触及(写手已失败提前返回)
+    _patch_review(monkeypatch, json.loads(_bb({}, "")), [])
+    _patch_options(monkeypatch, OptionsOutput(options=["x"]), [])
+
+    evs = []
+    async with Session() as s:
+        async for ev in stream_retry_turn(s, sid, "writer"):
+            evs.append(ev)
+    assert evs[-1]["type"] == "error" and "writer" in evs[-1]["reason"]
+    assert not any(e["type"] in ("state_updated", "retry_done") for e in evs)
+    # DB 完好:原叙事、黑板、选项一字未动
+    t2 = await _turn2(Session, sid)
+    assert t2.narrative == NARR_ORIG
+    assert json.loads(t2.options_json)["options"] == OPTS_ORIG.options
+    assert json.loads(t2.options_messages) == o_msgs
+    assert await _bb_now(Session, sid) == bb_before

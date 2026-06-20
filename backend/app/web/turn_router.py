@@ -1,14 +1,15 @@
 """回合推进(临时 SSE 流)+ 快照(普通 HTTP)。
 
-文本线:POST /story/{id}/turn 开一条 SSE,推 turn_started → narrative_token* →
-narrative_done → state_updated → draw_proposed? → turn_done,推完即关。
-内部就是已验证的 A→Writer→B→reducer,逻辑不动;回合内顺序约束保留(A/Writer/B 看同一份
-本回合之前的黑板与历史;reducer 三调后才写库)。
+文本线:POST /story/{id}/turn 开一条 SSE。四个 agent 都逐 token 流式产出 ——
+turn_started → director_a_token* →(A 解析)→ narrative_token* → narrative_done →
+director_b_token* ∥ options_token*(B 与 Options 并行,交错产出)→ options_proposed/options_failed →
+state_updated → draw_proposed? → turn_done,推完即关。
+内部就是已验证的 A→Writer→(B∥Options)→reducer,逻辑不动;回合内顺序约束保留(A/Writer/B 看同一份
+本回合之前的黑板与历史;reducer 三调后才写库)。流式只改输出呈现,不动 messages 前缀 → 缓存红利不变。
 
 恢复不靠 SSE,靠 GET /story/{id}/snapshot 拿完整黑板 + 历史。
 """
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -18,9 +19,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.agents.context import Message, build_messages
-from app.agents.director import run_director
-from app.agents.director_review import run_director_review
-from app.agents.options import run_options
+from app.agents.director import parse_director_output, stream_director
+from app.agents.director_review import stream_director_review
+from app.agents.options import stream_options
+from app.agents.streaming import BOResult, stream_b_and_options
 from app.agents.writer import stream_writer
 from app.db.models import Blackboard, ImageGen, Story, Turn
 from app.db.session import async_session
@@ -29,7 +31,8 @@ from app.knowledge.store import get_knowledge
 from app.state.reducer import reduce_turn
 from app.stories.settings_store import get_or_create_settings, resolve_agent_model
 from app.stories.store import touch_story
-from app.web.sse import SSE_HEADERS, sse
+from app.web.jobs import active_status, start_turn_job, turn_active
+from app.web.sse import sse
 
 router = APIRouter(prefix="/story", tags=["turn"])
 
@@ -78,17 +81,22 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
     # 三次调用的完整 messages 各构造一次,既喂给 LLM、又原样存档(M4.5-B)。
     # 用 build_messages 预构造后传给 agent 复用 → 存下的就是真正喂进去的那份,零偏差;
     # build_messages 逻辑/缓存不受影响(只是多存一份)。回合内顺序约束不变。
-    # ---- Director-A(读黑板 + 设定参考)----
+    # turn_started 先发:让前端/工作台即刻锁定本轮(A 仍在逐 token 流),再开始流 A。
+    yield sse({"type": "turn_started", "turn_index": next_idx})
+
+    # ---- Director-A(逐 token 流原始 JSON,累积后解析)----
     a_messages = build_messages(
         "director", history=history, blackboard=blackboard, user_action=user_input, knowledge=knowledge
     )
+    a_chunks: list[str] = []
     try:
-        a = await run_director(history, blackboard, user_input, knowledge=knowledge, messages=a_messages, model=model_a)
-    except Exception as exc:  # 解析失败(DirectorOutputError)或 LLM 调用本身失败(API/网络)均上报
+        async for tok in stream_director(history, blackboard, user_input, knowledge=knowledge, messages=a_messages, model=model_a):
+            a_chunks.append(tok)
+            yield sse({"type": "director_a_token", "text": tok})
+        a = parse_director_output("".join(a_chunks))  # 解析失败(DirectorOutputError)在此抛
+    except Exception as exc:  # 解析失败或 LLM 调用本身失败(API/网络)均上报
         yield sse({"type": "error", "reason": f"director-a: {exc}"})
         return
-
-    yield sse({"type": "turn_started", "turn_index": next_idx})
 
     # ---- Writer(逐 token 推)----
     w_messages = build_messages(
@@ -106,8 +114,9 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
     narrative = "".join(chunks)
     yield sse({"type": "narrative_done", "full_narrative": narrative})
 
-    # ---- Director-B ∥ Options(成稿后并行,互不依赖)----
+    # ---- Director-B ∥ Options(成稿后并行逐 token,互不依赖)----
     # 同读本轮之前的黑板+历史,易变区尾部各附 Writer 成稿与 tips。B 是状态权威、Options 是叶子。
+    # 两条子流交错产出 director_b_token / options_token;Options 失败不阻断(reducer 只等 B)。
     b_messages = build_messages(
         "director_review", history=history, blackboard=blackboard, user_action=user_input,
         narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips,
@@ -116,46 +125,23 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
         "options", history=history, blackboard=blackboard, user_action=user_input,
         narrative=narrative, tips=a.tips,
     )
-    b_task = asyncio.ensure_future(
-        run_director_review(
+    bo = BOResult()
+    async for ev in stream_b_and_options(
+        bo,
+        b_stream=stream_director_review(
             history, blackboard, user_input, narrative,
-            director_a_plan=a.model_dump(), messages=b_messages, model=model_b,
-        )
-    )
-    o_task = asyncio.ensure_future(
-        run_options(history, blackboard, user_input, narrative, tips=a.tips, messages=o_messages, model=model_o)
-    )
+            director_a_plan=a.model_dump(), tips=a.tips, messages=b_messages, model=model_b,
+        ),
+        o_stream=stream_options(
+            history, blackboard, user_input, narrative, tips=a.tips, messages=o_messages, model=model_o
+        ),
+    ):
+        yield sse(ev)
+    new_bb = bo.new_bb
+    options_json = bo.options_json
 
-    # 谁先完先点亮各自节点(options_proposed / 隐含于 state_updated);整流要等两者都结束才收。
-    # Options 失败不阻断落盘(reducer 只等 B);B 失败 → abort 整轮(并 cancel 还在跑的 Options)。
-    new_bb = None
-    options_json = ""  # 成功 → OptionsOutput JSON;失败/落空 → 空串
-    b_exc: Exception | None = None
-    pending = {b_task, o_task}
-    while pending and b_exc is None:
-        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-        for t in done:
-            if t is o_task:
-                try:
-                    options_out = o_task.result()
-                    options_json = options_out.model_dump_json()
-                    yield sse({"type": "options_proposed", "options": options_out.options})
-                except Exception as exc:  # 解析/LLM 失败:点红 options 节点,但不阻断本轮
-                    yield sse({"type": "options_failed", "reason": f"options: {exc}"})
-            else:
-                try:
-                    new_bb = t.result()
-                except Exception as exc:
-                    b_exc = exc
-
-    if b_exc is not None:
-        if not o_task.done():
-            o_task.cancel()
-            try:
-                await o_task
-            except (asyncio.CancelledError, Exception):
-                pass
-        yield sse({"type": "error", "reason": f"director-b: {b_exc}"})
+    if bo.b_exc is not None:  # B 失败 → abort 整轮(Options 结果一并丢弃)
+        yield sse({"type": "error", "reason": f"director-b: {bo.b_exc}"})
         return
 
     # ---- reducer(B+Options 都结束后才写库;Options 输出随轮存档,但不参与状态归并)----
@@ -183,11 +169,16 @@ async def _turn_events(story_id: str, user_input: str) -> AsyncIterator[str]:
 
 @router.post("/{story_id}/turn")
 async def post_turn(story_id: str, req: TurnReq) -> StreamingResponse:
-    return StreamingResponse(
-        _turn_events(story_id, req.user_input),
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
-    )
+    # 并发闸 + 断连存活:回合作为后台作业跑,刷新/关页不取消它 → 跑到底、落盘(见 web/jobs.py)。
+    if turn_active(story_id):
+        raise HTTPException(409, "本故事已有进行中的回合,请稍候")
+    return start_turn_job(story_id, _turn_events(story_id, req.user_input), meta={"kind": "turn", "user_input": req.user_input})
+
+
+@router.get("/{story_id}/active")
+async def get_active(story_id: str) -> dict:
+    """该故事此刻是否有在跑的作业(回合 / 绘图)。前端在重新加载后据此恢复「进行中」状态并轮询。"""
+    return active_status(story_id)
 
 
 @router.get("/{story_id}/snapshot")

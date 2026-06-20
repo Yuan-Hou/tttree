@@ -73,6 +73,17 @@ export function App() {
   const pickOption = useCallback((text: string) => setPrefill({ text, key: Date.now() }), []);
   const [inputFocused, setInputFocused] = useState(false); // 选项条仅在输入框激活时显示
 
+  // 有在飞请求时拦截刷新/关页:浏览器弹原生「离开此页?」确认。离开可能丢结果或浪费已花的 API 额度。
+  useEffect(() => {
+    if (!e.busy) return;
+    const warn = (ev: BeforeUnloadEvent) => {
+      ev.preventDefault();
+      ev.returnValue = ""; // 触发原生确认框(具体文案由浏览器决定,不可自定义)
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [e.busy]);
+
   // 回退(同导演工作台):先抓住「将被回退那一轮」(当前最新正常轮)的输入,回退后预填回输入框,便于改写重来。
   const doRollbackPrefill = useCallback(async () => {
     if (e.turnStreaming || e.retrying) return;
@@ -193,17 +204,33 @@ export function App() {
         {e.curId ? (
           <>
             <ReadingColumn turns={e.turns} onTurnClick={focusTurnOnMap} onDismissFailure={e.dismissFailure} />
-            {inputFocused && <OptionChips options={e.options} disabled={e.turnStreaming} onPick={pickOption} />}
+            {(e.recovering || e.activeDraws > 0) && (
+              <div className="mx-auto w-full max-w-[640px] px-10 pt-2">
+                <div className="flex items-center gap-2 rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-[12.5px] text-accent-ink">
+                  <span className="inline-block animate-spin">⟳</span>
+                  {e.recovering ? (
+                    <span>
+                      页面刷新前的{e.recovering.kind === "retry" ? "重走" : "新回合"}仍在后台生成,正在恢复…
+                      {e.recovering.user_input ? `(${e.recovering.user_input})` : ""}
+                      {e.activeDraws > 0 && ` · ${e.activeDraws} 张插画生成中`}
+                    </span>
+                  ) : (
+                    <span>{e.activeDraws} 张插画仍在后台生成,完成后自动浮现…</span>
+                  )}
+                </div>
+              </div>
+            )}
+            {inputFocused && <OptionChips options={e.options} disabled={e.turnStreaming || e.recovering != null} onPick={pickOption} />}
             <Composer
               disabled={!e.curId}
-              streaming={e.turnStreaming}
+              streaming={e.turnStreaming || e.recovering != null}
               onSubmit={e.submitTurn}
               prefillText={prefill?.text}
               prefillKey={prefill?.key}
               onFocusChange={setInputFocused}
               onRollback={doRollbackPrefill}
               onFork={doForkToast}
-              canRollback={e.latestTurn != null && !e.turnStreaming && !e.retrying}
+              canRollback={e.latestTurn != null && !e.turnStreaming && !e.retrying && e.recovering == null}
             />
           </>
         ) : (
@@ -354,6 +381,7 @@ export function App() {
           latestTurn={e.latestTurn}
           liveStages={e.liveStages}
           liveTurn={e.liveTurn}
+          liveOutputs={e.liveOutputs}
           turnStreaming={e.turnStreaming}
           retrying={e.retrying}
           contextsVersion={e.contextsVersion}

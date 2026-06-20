@@ -1,5 +1,6 @@
 // 同源调用(开发期由 Vite proxy 转发到 :8000;部署期与 FastAPI 同源)。
 import type {
+  ActiveStatus,
   ContextMessage,
   Draft,
   DrawEvent,
@@ -7,6 +8,7 @@ import type {
   PickedRef,
   ProposalDraw,
   ProposalsResp,
+  RetryEvent,
   SceneMap,
   Snapshot,
   StorySettings,
@@ -44,6 +46,9 @@ export const renameStory = (id: string, title: string) =>
   );
 
 export const getSnapshot = (id: string) => jget<Snapshot>(`/story/${id}/snapshot`);
+
+/** 该故事此刻在跑的后台作业(回合 / 绘图)。重新加载后据此恢复「进行中」状态并轮询。 */
+export const getActive = (id: string) => jget<ActiveStatus>(`/story/${id}/active`);
 
 /** 导出整卷故事为单文件 HTML(只读浏览版)。layout = 当前地图节点布局(随导出带上)。
  *  返回 blob + 后端给的文件名,供前端触发下载。 */
@@ -169,13 +174,14 @@ export const saveStepContext = (
 export const rollback = (id: string) =>
   fetch(`/story/${id}/rollback`, { method: "POST", headers: json }).then((r) => r.json());
 
-export const retry = (id: string, entry: "director_a" | "writer" | "director_b" | "options") =>
-  fetch(`/story/${id}/retry`, { method: "POST", headers: json, body: JSON.stringify({ entry }) }).then(
-    async (r) => {
-      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-      return r.json();
-    },
-  );
+/** 重试(重)走:短命 SSE 流,逐 token 看各重走 agent 的输出。失败前后端 DB 不变 → 收到 error
+ *  事件时调用方恢复原显示。entry 之后的旧结果由后端覆盖(成功)或保留(失败)。 */
+export const streamRetry = (
+  id: string,
+  entry: "director_a" | "writer" | "director_b" | "options",
+  onEvent: (e: RetryEvent) => void,
+  signal?: AbortSignal,
+) => streamSSE<RetryEvent>(`/story/${id}/retry`, { entry }, onEvent, signal);
 
 export const forkStory = (id: string) =>
   fetch(`/stories/${id}/fork`, { method: "POST", headers: json }).then((r) => r.json() as Promise<StoryInfo>);
@@ -263,6 +269,7 @@ export const isAbortError = (e: unknown): boolean =>
 /** 通用 SSE:fetch + ReadableStream,逐帧(\n\n 分隔)解析 `data: {json}`。signal 可中途取消。 */
 async function streamSSE<E>(url: string, body: unknown, onEvent: (e: E) => void, signal?: AbortSignal): Promise<void> {
   const resp = await fetch(url, { method: "POST", headers: json, body: JSON.stringify(body), signal });
+  if (!resp.ok) throw new Error(`${resp.status} ${await resp.text()}`); // 如并发闸 409:别把错误响应当成空流静默吞掉
   if (!resp.body) throw new Error("无响应流");
   const reader = resp.body.getReader();
   const dec = new TextDecoder();

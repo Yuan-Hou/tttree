@@ -1,7 +1,7 @@
 """重试(retry)——时间操作之一(M4.5-C-4)。
 
-在当前最新一轮,从指定切入点重走,复用现有三段式执行逻辑(run_director / stream_writer /
-run_director_review / reduce_turn),不另写一套 agent 调用:
+在当前最新一轮,从指定切入点重走,复用现有三段式执行逻辑(stream_director / stream_writer /
+stream_director_review / stream_options / reduce_turn),逐 token 流式产出、不另写一套 agent 调用:
 
   - 从 A 前(director_a) → 整轮重来:A→Writer→(B ∥ Options)
   - 从 Writer 前(writer) → 保留本轮 A,重走 Writer→(B ∥ Options)
@@ -25,15 +25,16 @@ Options;B 与 Options 是并行兄弟,互不影响(B 重走不动 Options,Option
 """
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.context import build_messages
-from app.agents.director import run_director
-from app.agents.director_review import run_director_review
-from app.agents.options import run_options
+from app.agents.director import parse_director_output, stream_director
+from app.agents.director_review import parse_review_output, stream_director_review
+from app.agents.options import parse_options_output, stream_options
 from app.agents.writer import stream_writer
 from app.db.models import Turn
 from app.knowledge.store import get_knowledge
@@ -73,9 +74,23 @@ async def _history_before(session: AsyncSession, story_id: str, n: int) -> list[
     return history
 
 
-async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryResult:
+async def stream_retry_turn(session: AsyncSession, story_id: str, entry: str) -> AsyncIterator[dict]:
+    """重试的流式版本:逐 token 产各重走 agent 的输出,最后一次性动 DB(失败前 DB 不变 → 安全)。
+
+    产出事件(dict,供 SSE 包装):
+      - retry_started {entry, turn_index}
+      - director_a_token / narrative_token / narrative_done / director_b_token / options_token(逐 token)
+      - options_proposed / options_failed
+      - state_updated {blackboard, beat_title}(reduce 落盘后;options 叶子重试无此事件)
+      - retry_done {entry, turn_index, narrative, blackboard, invalidated_scene_slugs, new_scene_slugs}
+      - error {reason}(任一步失败;此前 DB 未改 → 原轮完好,调用方据此恢复显示)
+
+    切入点语义与原 retry_turn 完全一致(见模块 docstring);只是把「跑完再返回」改成「边跑边产事件」。
+    B 与 Options 顺序重走(B 先、O 后),各自逐 token —— 重试是用户主动操作,非热路径,顺序流更易观察。
+    """
     if entry not in ENTRY_POINTS:
-        return RetryResult(ok=False, reason=f"未知切入点: {entry!r}(应为 {ENTRY_POINTS})")
+        yield {"type": "error", "reason": f"未知切入点: {entry!r}(应为 {ENTRY_POINTS})"}
+        return
 
     turns_desc = (
         await session.execute(
@@ -83,10 +98,12 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
         )
     ).scalars().all()
     if not turns_desc:
-        return RetryResult(ok=False, reason="没有可重试的回合")
+        yield {"type": "error", "reason": "没有可重试的回合"}
+        return
     turn_n = turns_desc[0]
     n = turn_n.turn_index
     user_input = turn_n.user_input
+    yield {"type": "retry_started", "entry": entry, "turn_index": n}
 
     # 本轮之前的黑板与历史(A/Writer/B 共享这同一份;只读,先在内存跑完三段再动 DB)
     prev = turns_desc[1] if len(turns_desc) > 1 else None
@@ -114,16 +131,27 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
             "options", history=history, blackboard=pre_bb, user_action=user_input,
             narrative=narrative, tips=a.tips,
         )
-        options_out = await run_options(
-            history, pre_bb, user_input, narrative, tips=a.tips, messages=o_messages, model=model_o
-        )
+        o_chunks: list[str] = []
+        try:
+            async for tok in stream_options(
+                history, pre_bb, user_input, narrative, tips=a.tips, messages=o_messages, model=model_o
+            ):
+                o_chunks.append(tok)
+                yield {"type": "options_token", "text": tok}
+            options_out = parse_options_output("".join(o_chunks))
+        except Exception as exc:  # 叶子自重试失败:不落盘(保留原选项),上报错误
+            yield {"type": "error", "reason": f"options: {exc}"}
+            return
         turn_n.options_json = options_out.model_dump_json()
         turn_n.options_messages = json.dumps(o_messages, ensure_ascii=False)
         await session.commit()
-        return RetryResult(
-            ok=True, entry="options", turn_index=n, narrative=narrative,
-            blackboard=json.loads(turn_n.blackboard_after) if turn_n.blackboard_after else {},
-        )
+        yield {"type": "options_proposed", "options": options_out.options}
+        yield {
+            "type": "retry_done", "entry": "options", "turn_index": n, "narrative": narrative,
+            "blackboard": json.loads(turn_n.blackboard_after) if turn_n.blackboard_after else {},
+            "invalidated_scene_slugs": [], "new_scene_slugs": [],
+        }
+        return
 
     # ---- Director-A:新走(director_a 切入)或保留 ----
     # A 的上下文只取决于「本轮之前的状态」,重试时不变 → 存档的 director_a_messages 始终是其正确上下文。
@@ -131,7 +159,17 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
         "director", history=history, blackboard=pre_bb, user_action=user_input, knowledge=knowledge
     )
     if entry == "director_a":
-        a = await run_director(history, pre_bb, user_input, knowledge=knowledge, messages=a_messages, model=model_a)
+        a_chunks: list[str] = []
+        try:
+            async for tok in stream_director(
+                history, pre_bb, user_input, knowledge=knowledge, messages=a_messages, model=model_a
+            ):
+                a_chunks.append(tok)
+                yield {"type": "director_a_token", "text": tok}
+            a = parse_director_output("".join(a_chunks))
+        except Exception as exc:
+            yield {"type": "error", "reason": f"director-a: {exc}"}
+            return
     else:
         a = DirectorOutput.model_validate_json(turn_n.director_a_json)
 
@@ -150,14 +188,20 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
                 writing_brief=a.writing_brief, tips=a.tips,
             )
         chunks: list[str] = []
-        async for tok in stream_writer(history, pre_bb, user_input, a.writing_brief, messages=w_messages, model=model_w):
-            chunks.append(tok)
+        try:
+            async for tok in stream_writer(history, pre_bb, user_input, a.writing_brief, messages=w_messages, model=model_w):
+                chunks.append(tok)
+                yield {"type": "narrative_token", "text": tok}
+        except Exception as exc:
+            yield {"type": "error", "reason": f"writer: {exc}"}
+            return
         narrative = "".join(chunks)
+        yield {"type": "narrative_done", "full_narrative": narrative}
     else:  # director_b:保留 Writer 成稿
         narrative = turn_n.narrative
         w_messages = json.loads(turn_n.writer_messages or "[]")
 
-    # ---- Director-B:总是重走 ----
+    # ---- Director-B:总是重走(逐 token)----
     if entry == "director_b":
         # A、Writer 均保留 → B 上下文与原先逐字节相同 → 复用存档 messages(缓存命中)
         b_messages = json.loads(turn_n.director_b_messages or "[]") or build_messages(
@@ -170,9 +214,18 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
             "director_review", history=history, blackboard=pre_bb, user_action=user_input,
             narrative=narrative, director_a_plan=a.model_dump(), tips=a.tips,
         )
-    new_bb = await run_director_review(
-        history, pre_bb, user_input, narrative, director_a_plan=a.model_dump(), messages=b_messages, model=model_b
-    )
+    b_chunks: list[str] = []
+    try:
+        async for tok in stream_director_review(
+            history, pre_bb, user_input, narrative, director_a_plan=a.model_dump(),
+            tips=a.tips, messages=b_messages, model=model_b,
+        ):
+            b_chunks.append(tok)
+            yield {"type": "director_b_token", "text": tok}
+        new_bb = parse_review_output("".join(b_chunks))
+    except Exception as exc:
+        yield {"type": "error", "reason": f"director-b: {exc}"}
+        return
 
     # ---- Options(B 的并行兄弟):director_b 切入 → 保留原 Options;上游(A/Writer)切入 → 连带重跑 ----
     # 必须在 rollback 删 turn_n 之前把要保留的两列读进局部变量。重跑失败不阻断重试(options 落空)。
@@ -184,13 +237,19 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
             "options", history=history, blackboard=pre_bb, user_action=user_input,
             narrative=narrative, tips=a.tips,
         )
+        oo_chunks: list[str] = []
         try:
-            options_out = await run_options(
+            async for tok in stream_options(
                 history, pre_bb, user_input, narrative, tips=a.tips, messages=o_messages, model=model_o
-            )
+            ):
+                oo_chunks.append(tok)
+                yield {"type": "options_token", "text": tok}
+            options_out = parse_options_output("".join(oo_chunks))
             options_json = options_out.model_dump_json()
-        except Exception:  # Options 失败不阻断重试
+            yield {"type": "options_proposed", "options": options_out.options}
+        except Exception as exc:  # Options 失败不阻断重试(options 落空)
             options_json = ""
+            yield {"type": "options_failed", "reason": f"options: {exc}"}
         options_messages = json.dumps(o_messages, ensure_ascii=False)
 
     # ---- 全部跑完,才动 DB ----
@@ -211,13 +270,24 @@ async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryR
         options_json=options_json,
         options_messages=options_messages,
     )
+    new_scenes = scenes_born_in_turn(result.blackboard, result.turn_index)
+    yield {"type": "state_updated", "blackboard": result.blackboard, "beat_title": result.beat_title}
+    yield {
+        "type": "retry_done", "entry": entry, "turn_index": result.turn_index, "narrative": narrative,
+        "blackboard": result.blackboard, "invalidated_scene_slugs": invalidated, "new_scene_slugs": new_scenes,
+    }
 
-    return RetryResult(
-        ok=True,
-        entry=entry,
-        turn_index=result.turn_index,
-        narrative=narrative,
-        blackboard=result.blackboard,
-        invalidated_scene_slugs=invalidated,
-        new_scene_slugs=scenes_born_in_turn(result.blackboard, result.turn_index),
-    )
+
+async def retry_turn(session: AsyncSession, story_id: str, entry: str) -> RetryResult:
+    """非流式包装:把 stream_retry_turn 跑干,归并成 RetryResult(供非 SSE 调用方 / 单测复用)。"""
+    result = RetryResult(ok=False)
+    async for ev in stream_retry_turn(session, story_id, entry):
+        if ev["type"] == "retry_done":
+            result = RetryResult(
+                ok=True, entry=ev["entry"], turn_index=ev["turn_index"], narrative=ev["narrative"],
+                blackboard=ev["blackboard"], invalidated_scene_slugs=ev["invalidated_scene_slugs"],
+                new_scene_slugs=ev["new_scene_slugs"],
+            )
+        elif ev["type"] == "error":
+            return RetryResult(ok=False, reason=ev["reason"])
+    return result

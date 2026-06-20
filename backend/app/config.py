@@ -23,5 +23,9 @@ class Settings(BaseSettings):
     # 让已写进 .env 的 CLAUDE_API_KEY 通过校验(Settings 禁止未声明字段)。
     claude_api_key: str | None = None
 
+    # Google Gemini——provider 适配尚未接入,此处先声明 key 字段,
+    # 让已写进 .env 的 GOOGLE_API_KEY 通过校验(Settings 禁止未声明字段)。
+    google_api_key: str | None = None
+
 
 settings = Settings()

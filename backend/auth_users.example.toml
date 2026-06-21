@@ -1,0 +1,10 @@
+# 用户清单(无注册系统)。复制为 auth_users.toml(已 gitignore)后改成真实口令。
+# id       数据归属用户号 = Story.owner_id,也是 JWT 里的 uid。现有全部数据归 "1"。
+# name     登录名。
+# password 登录口令(明文;自托管、文件不入库)。
+# 新增用户 = 在此追加一段 [[users]] 后重启后端。
+
+[[users]]
+id = "1"
+name = "admin"
+password = "change-me"

@@ -72,7 +72,7 @@ async def test_story_isolation_and_delete_cleanup(tmp_path):
 
     # 列表带 turn_count
     async with Session() as s:
-        infos = {i.id: i for i in await list_stories(s)}
+        infos = {i.id: i for i in await list_stories(s, "1")}
     assert infos[aid].turn_count == 1
     assert infos[bid].turn_count == 0
 

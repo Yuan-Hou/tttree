@@ -16,7 +16,9 @@ from app.imaging.pipeline import CANON_ORIGIN
 from app.stories.scene_map import build_scene_map
 from app.web.deps import get_session
 
-router = APIRouter(prefix="/story", tags=["scene-map"])
+from app.web.auth_deps import require_story_owner
+
+router = APIRouter(prefix="/story", tags=["scene-map"], dependencies=[Depends(require_story_owner)])
 
 
 def _load(blob: str | None) -> dict:

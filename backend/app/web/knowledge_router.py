@@ -12,7 +12,9 @@ from app.db.models import Story
 from app.knowledge.store import get_knowledge, set_knowledge
 from app.web.deps import get_session
 
-router = APIRouter(prefix="/story", tags=["knowledge"])
+from app.web.auth_deps import require_story_owner
+
+router = APIRouter(prefix="/story", tags=["knowledge"], dependencies=[Depends(require_story_owner)])
 
 
 class KnowledgeReq(BaseModel):

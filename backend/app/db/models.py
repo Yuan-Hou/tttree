@@ -17,6 +17,9 @@ class Story(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)  # story_id
     title: Mapped[str] = mapped_column(String, nullable=False)
+    # 数据归属:用户系统。owner_id = auth_users 里的用户号。所有故事级数据经故事归属隔离;
+    # 旧库迁移把现有故事一律回填 "1"(见 db.session._add_missing_columns)。
+    owner_id: Mapped[str] = mapped_column(String, default="1", index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     last_active_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
@@ -151,21 +154,42 @@ class StorySettings(Base):
 
 
 class AppSettings(Base):
-    """全站单例设置(尚无用户系统期):目前只含 6 个接入点的供应商配置。
+    """每用户的接入点供应商配置(用户系统)。每用户一行,主键 = user_id(= Story.owner_id)。
 
-    单行,主键固定为 'singleton'。endpoints_json 形如
+    endpoints_json 形如
     {endpoint_id: {"mode": "site"|"custom", "base_url": str, "api_key_enc": str}}。
     site 模式的接入点可不出现在该 dict;custom 项必含 base_url + api_key_enc(密文,见 app.crypto)。
-    读出后解密成内存覆盖表(app.llm.endpoints._OVERRIDES)。
+    读出后逐用户解密成内存覆盖表(app.llm.endpoints._OVERRIDES)。
+    旧库的全站单例行(id='singleton')迁移成 1 号用户(见 db.session._add_missing_columns)。
     """
 
     __tablename__ = "app_settings"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default="singleton")
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # user_id
     endpoints_json: Mapped[str] = mapped_column(Text, default="{}")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
+
+
+class NewApiAccount(Base):
+    """每个 vore-tree 用户在 new-api 网关里的对应账号 + 模型 key(用户系统 · new-api 接入)。
+
+    「本站点服务」经 new-api 调模型时,按 vore-tree 用户隔离:每用户在 new-api 建一个子用户
+    (用户名 = uid-随机,受 new-api 用户名 20 字符上限约束)、在其名下建一个模型令牌,取其明文 key。
+    api_key 形如 'sk-…',直接作 Authorization: Bearer 调 new-api。**按用户要求明文记录**(自托管)。
+    一用户一行,user_id = 该 vore-tree 用户号(= Story.owner_id)。
+    """
+
+    __tablename__ = "newapi_accounts"
+
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)  # vore-tree uid
+    newapi_user_id: Mapped[int] = mapped_column(Integer, nullable=False)  # new-api 里的数字用户号
+    username: Mapped[str] = mapped_column(String, nullable=False)  # new-api 登录名(uid-随机)
+    password: Mapped[str] = mapped_column(String, nullable=False)  # new-api 登录口令(明文)
+    token_id: Mapped[int] = mapped_column(Integer, nullable=False)  # new-api 里模型令牌的 id
+    api_key: Mapped[str] = mapped_column(String, nullable=False)  # 模型 key(明文,'sk-…')
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class DrawProposal(Base):

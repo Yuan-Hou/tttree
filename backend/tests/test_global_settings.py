@@ -3,16 +3,19 @@
 不打真 LLM:只验证 base_url / api_key 解析与落库加密。覆盖表是模块级状态,每个用例末尾复位避免泄漏。
 """
 
+import asyncio
+
 import httpx
 import pytest
 
+from app.auth.context import current_uid
 from app.db.session import create_all, make_engine, make_session_factory
 from app.llm import endpoints
 from app.llm.registry import resolve_chat
 
 
 def _reset_overrides():
-    endpoints.set_overrides({})
+    endpoints.clear_all_overrides()
 
 
 # ── 加密 ────────────────────────────────────────────────────
@@ -47,32 +50,77 @@ def test_crypto_wrong_secret_fails(monkeypatch):
 
 
 # ── 接入点解析 ───────────────────────────────────────────────
-def test_resolve_endpoint_site_uses_env(monkeypatch):
-    monkeypatch.setattr("app.config.settings.google_api_key", "sk-env-google", raising=False)
+def test_resolve_endpoint_site_uses_new_api(monkeypatch):
+    """本站点服务 → 经 new-api 网关 + 该用户 token;无 token → key=None(不回落 .env)。"""
+    monkeypatch.setattr("app.config.settings.new_api_base_url", "https://gw.test", raising=False)
     _reset_overrides()
     try:
-        base_url, key = endpoints.resolve_endpoint("google_text")
-        assert key == "sk-env-google"
-        assert base_url.endswith("/v1beta/openai/")
-        assert endpoints.endpoint_mode("google_text") == "site"
+        base, key = endpoints.resolve_endpoint("google_text", user_id="9")  # 9 号尚无 token
+        assert base == "https://gw.test/v1" and key is None
+        assert endpoints.endpoint_mode("google_text", user_id="9") == "site"
+        # 有 token:各接入点按其路径段拼到 new-api host
+        endpoints.set_user_site_key("9", "sk-u9")
+        assert endpoints.resolve_endpoint("google_text", user_id="9") == ("https://gw.test/v1", "sk-u9")
+        assert endpoints.resolve_endpoint("anthropic", user_id="9") == ("https://gw.test", "sk-u9")
+        assert endpoints.resolve_endpoint("google_image", user_id="9") == ("https://gw.test/v1beta/", "sk-u9")
     finally:
+        endpoints.set_user_site_key("9", "")
         _reset_overrides()
 
 
-def test_resolve_endpoint_custom_overrides_env(monkeypatch):
-    monkeypatch.setattr("app.config.settings.google_api_key", "sk-env-google", raising=False)
+def test_resolve_endpoint_custom_overrides_env():
+    tok = current_uid.set("1")  # 模拟「1 号用户的请求/作业」上下文
     try:
-        endpoints.set_overrides(
-            {"google_text": endpoints.Override(base_url="https://my.gw/v1/", api_key="sk-custom")}
+        endpoints.set_user_overrides(
+            "1", {"google_text": endpoints.Override(base_url="https://my.gw/v1/", api_key="sk-custom")}
         )
-        base_url, key = endpoints.resolve_endpoint("google_text")
-        assert (base_url, key) == ("https://my.gw/v1/", "sk-custom")
+        # 显式 user_id 与 contextvar 两条路径都取到自定义
+        assert endpoints.resolve_endpoint("google_text", user_id="1") == ("https://my.gw/v1/", "sk-custom")
+        assert endpoints.resolve_endpoint("google_text") == ("https://my.gw/v1/", "sk-custom")
         assert endpoints.endpoint_mode("google_text") == "custom"
-        # registry 的 client 取自定义 base_url + key
+        # registry 的 client 经 contextvar 取自定义 base_url + key
         client, model = resolve_chat("gemini-3.5-flash")
         assert str(client.base_url).startswith("https://my.gw/v1")
         assert client.api_key == "sk-custom"
     finally:
+        current_uid.reset(tok)
+        _reset_overrides()
+
+
+async def test_resolve_propagates_into_create_task():
+    """核心不变量:在 current_uid 已设的上下文里 create_task,子任务继承该 uid → 深处 resolve_endpoint
+    (不显式传 uid)取到该用户的覆盖。这正是回合/绘图后台作业(start_*_job → create_task)的凭证穿透路径。"""
+    endpoints.set_user_overrides(
+        "1", {"openai": endpoints.Override(base_url="https://u1/v1", api_key="sk-u1")}
+    )
+    tok = current_uid.set("1")
+    try:
+        out: dict = {}
+
+        async def _job() -> None:
+            out["res"] = endpoints.resolve_endpoint("openai")  # 无显式 uid,靠继承的 ctx
+
+        await asyncio.create_task(_job())
+        assert out["res"] == ("https://u1/v1", "sk-u1")
+    finally:
+        current_uid.reset(tok)
+        _reset_overrides()
+
+
+def test_overrides_are_per_user(monkeypatch):
+    monkeypatch.setattr("app.config.settings.new_api_base_url", "https://gw.test", raising=False)
+    try:
+        endpoints.set_user_overrides(
+            "1", {"openai": endpoints.Override(base_url="https://u1.gw/v1", api_key="sk-u1")}
+        )
+        endpoints.set_user_site_key("2", "sk-u2-site")
+        # 1 号:自定义;2 号:本站点服务(new-api + 自己的 token);9 号:无 token → key=None
+        assert endpoints.resolve_endpoint("openai", user_id="1") == ("https://u1.gw/v1", "sk-u1")
+        assert endpoints.resolve_endpoint("openai", user_id="2") == ("https://gw.test/v1", "sk-u2-site")
+        assert endpoints.endpoint_mode("openai", user_id="2") == "site"
+        assert endpoints.resolve_endpoint("openai", user_id="9")[1] is None
+    finally:
+        endpoints.set_user_site_key("2", "")
         _reset_overrides()
 
 
@@ -92,6 +140,7 @@ async def test_store_custom_encrypts_masks_and_applies(tmp_path, monkeypatch):
         async with Session() as s:
             row = await update_app_settings(
                 s,
+                "1",
                 {"openai": {"mode": "custom", "base_url": "https://gw.example/v1", "api_key": "sk-USER-9999"}},
             )
             # 落库为密文,不含明文
@@ -104,24 +153,24 @@ async def test_store_custom_encrypts_masks_and_applies(tmp_path, monkeypatch):
             assert oa["base_url"] == "https://gw.example/v1"
             assert "sk-USER-9999" not in str(payload) and "f1:" not in str(payload)
             assert oa["key_masked"].endswith("9999")  # 只露尾 4 位
-            # 即时生效:内存覆盖表已更新
-            assert endpoints.resolve_endpoint("openai") == ("https://gw.example/v1", "sk-USER-9999")
+            # 即时生效:1 号用户的内存覆盖表已更新
+            assert endpoints.resolve_endpoint("openai", user_id="1") == ("https://gw.example/v1", "sk-USER-9999")
 
             # 改回本站点服务 → 清掉自定义
-            await update_app_settings(s, {"openai": {"mode": "site"}})
-            assert endpoints.endpoint_mode("openai") == "site"
+            await update_app_settings(s, "1", {"openai": {"mode": "site"}})
+            assert endpoints.endpoint_mode("openai", user_id="1") == "site"
 
         # 重新从库载入(模拟重启)仍能还原 custom
         async with Session() as s:
             await update_app_settings(
-                s, {"zai": {"mode": "custom", "base_url": "https://z.gw/v1", "api_key": "sk-Z"}}
+                s, "1", {"zai": {"mode": "custom", "base_url": "https://z.gw/v1", "api_key": "sk-Z"}}
             )
         _reset_overrides()
         async with Session() as s:
             from app.global_settings_store import load_overrides_into_memory
 
             await load_overrides_into_memory(s)
-        assert endpoints.resolve_endpoint("zai") == ("https://z.gw/v1", "sk-Z")
+        assert endpoints.resolve_endpoint("zai", user_id="1") == ("https://z.gw/v1", "sk-Z")
     finally:
         _reset_overrides()
         await engine.dispose()
@@ -137,16 +186,16 @@ async def test_store_custom_requires_key_and_secret(tmp_path, monkeypatch):
         async with Session() as s:
             with pytest.raises(GlobalSettingsError):
                 await update_app_settings(
-                    s, {"openai": {"mode": "custom", "base_url": "u", "api_key": "k"}}
+                    s, "1", {"openai": {"mode": "custom", "base_url": "u", "api_key": "k"}}
                 )
         # 有 secret 但首次 custom 不给 key → 报错
         monkeypatch.setattr("app.config.settings.app_secret", "sec", raising=False)
         async with Session() as s:
             with pytest.raises(GlobalSettingsError):
-                await update_app_settings(s, {"openai": {"mode": "custom", "base_url": "u"}})
+                await update_app_settings(s, "1", {"openai": {"mode": "custom", "base_url": "u"}})
             # 未知接入点 → 报错
             with pytest.raises(GlobalSettingsError):
-                await update_app_settings(s, {"nope": {"mode": "site"}})
+                await update_app_settings(s, "1", {"nope": {"mode": "site"}})
     finally:
         _reset_overrides()
         await engine.dispose()
@@ -191,16 +240,16 @@ async def test_global_settings_api_roundtrip(tmp_path, monkeypatch):
             # 响应不含明文
             assert "sk-IMG-7777" not in (await c.get("/global-settings")).text
 
-            # 只改 URL、不重填 key → 保留旧 key
+            # 只改 URL、不重填 key → 保留旧 key(HTTP 经 conftest 默认以 1 号用户登录)
             await c.put(
                 "/global-settings",
                 json={"endpoints": {"google_image": {"mode": "custom", "base_url": "https://img2.gw/"}}},
             )
-            assert endpoints.resolve_endpoint("google_image") == ("https://img2.gw/", "sk-IMG-7777")
+            assert endpoints.resolve_endpoint("google_image", user_id="1") == ("https://img2.gw/", "sk-IMG-7777")
 
             # 改回本站
             await c.put("/global-settings", json={"endpoints": {"google_image": {"mode": "site"}}})
-            assert endpoints.endpoint_mode("google_image") == "site"
+            assert endpoints.endpoint_mode("google_image", user_id="1") == "site"
     finally:
         _reset_overrides()
         await engine.dispose()

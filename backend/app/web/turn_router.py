@@ -13,7 +13,7 @@ state_updated → draw_proposed? → turn_done,推完即关。
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -32,10 +32,11 @@ from app.state.reducer import reduce_turn
 from app.agents.bibles import resolve_style_bible
 from app.stories.settings_store import get_or_create_settings, resolve_agent_model
 from app.stories.store import touch_story
+from app.web.auth_deps import require_story_owner
 from app.web.jobs import active_status, start_turn_job, turn_active
 from app.web.sse import sse
 
-router = APIRouter(prefix="/story", tags=["turn"])
+router = APIRouter(prefix="/story", tags=["turn"], dependencies=[Depends(require_story_owner)])
 
 
 class TurnReq(BaseModel):

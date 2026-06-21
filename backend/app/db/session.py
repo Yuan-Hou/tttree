@@ -38,6 +38,18 @@ def _add_missing_columns(conn) -> None:
     if "superseded" not in cols:
         conn.execute(text("ALTER TABLE image_gens ADD COLUMN superseded BOOLEAN NOT NULL DEFAULT 0"))
 
+    # 用户系统:故事归属。旧库现有故事一律回填 owner_id="1"(1 号用户拥有此前全部数据)。
+    story_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(stories)")).fetchall()}
+    if story_cols and "owner_id" not in story_cols:
+        conn.execute(text("ALTER TABLE stories ADD COLUMN owner_id VARCHAR NOT NULL DEFAULT '1'"))
+
+    # 全局设置从「全站单例」改为「按用户」:旧的 'singleton' 行归 1 号用户(仅当 '1' 行尚不存在)。
+    appset_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(app_settings)")).fetchall()}
+    if appset_cols:
+        has_one = conn.execute(text("SELECT 1 FROM app_settings WHERE id='1'")).fetchone()
+        if not has_one:
+            conn.execute(text("UPDATE app_settings SET id='1' WHERE id='singleton'"))
+
     # Options agent(里程碑:tips + 选项):turns 存它的输出与上下文、story_settings 存它的模型覆盖。
     turn_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(turns)")).fetchall()}
     if turn_cols:  # 表已存在(旧库)才补;全新库由 create_all 直接带列

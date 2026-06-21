@@ -23,7 +23,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -45,10 +45,11 @@ from app.models.schemas import ReferenceRef
 from app.storage import BACKEND_ROOT
 from app.stories.store import touch_story
 from app.turns.draw_proposals import get_proposal, kind_for, mark_proposal_done
+from app.web.auth_deps import require_story_owner
 from app.web.jobs import start_draw_job
 from app.web.sse import sse
 
-router = APIRouter(prefix="/story", tags=["draw"])
+router = APIRouter(prefix="/story", tags=["draw"], dependencies=[Depends(require_story_owner)])
 
 
 @dataclass

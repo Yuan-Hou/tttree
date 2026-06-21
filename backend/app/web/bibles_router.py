@@ -20,7 +20,9 @@ from app.db.models import Story
 from app.stories.settings_store import get_or_create_settings, update_bibles
 from app.web.deps import get_session
 
-router = APIRouter(prefix="/story", tags=["bibles"])
+from app.web.auth_deps import require_story_owner
+
+router = APIRouter(prefix="/story", tags=["bibles"], dependencies=[Depends(require_story_owner)])
 
 
 class BiblesReq(BaseModel):

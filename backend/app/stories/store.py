@@ -45,9 +45,9 @@ class StoryInfo:
     turn_count: int
 
 
-async def create_story(session: AsyncSession, *, title: str) -> Story:
+async def create_story(session: AsyncSession, *, title: str, owner_id: str = "1") -> Story:
     story_id = uuid.uuid4().hex
-    session.add(Story(id=story_id, title=title))
+    session.add(Story(id=story_id, title=title, owner_id=owner_id))
     session.add(
         Blackboard(story_id=story_id, json_blob=json.dumps(empty_blackboard(), ensure_ascii=False))
     )
@@ -96,7 +96,7 @@ async def fork_story(session: AsyncSession, story_id: str) -> Story | None:
         await session.execute(select(func.count()).select_from(Turn).where(Turn.story_id == story_id))
     ).scalar() or 0
     new_title = await _unique_fork_title(session, src.title, beat)
-    new_story = Story(id=new_id, title=new_title)
+    new_story = Story(id=new_id, title=new_title, owner_id=src.owner_id)  # 副本归同一用户
     session.add(new_story)
 
     # 黑板(整存复制;image_paths 里的磁盘路径原样指向共享文件)
@@ -202,8 +202,13 @@ def _remap_manifest_assets(manifest_json: str, ref_id_map: dict[int, int]) -> st
     return json.dumps(items, ensure_ascii=False)
 
 
-async def list_stories(session: AsyncSession) -> list[StoryInfo]:
-    stories = (await session.execute(select(Story).order_by(Story.last_active_at.desc()))).scalars().all()
+async def list_stories(session: AsyncSession, owner_id: str) -> list[StoryInfo]:
+    """只列出归属该用户的故事(数据隔离)。"""
+    stories = (
+        await session.execute(
+            select(Story).where(Story.owner_id == owner_id).order_by(Story.last_active_at.desc())
+        )
+    ).scalars().all()
     out: list[StoryInfo] = []
     for s in stories:
         n = (

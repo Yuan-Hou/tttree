@@ -23,13 +23,16 @@ from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import brand_title
 from app.db.models import Story
 from app.storage import abs_from_rel
 from app.web.deps import get_session
 from app.web.scene_map_router import get_scene_map
 from app.web.turn_router import get_snapshot
 
-router = APIRouter(prefix="/story", tags=["export"])
+from app.web.auth_deps import require_story_owner
+
+router = APIRouter(prefix="/story", tags=["export"], dependencies=[Depends(require_story_owner)])
 
 # 查看器单文件模板(由 `npm run build:viewer` 产出)。缺失时给出可操作的提示。
 _VIEWER_TEMPLATE = Path(__file__).resolve().parents[3] / "frontend" / "dist-viewer" / "viewer.html"
@@ -128,7 +131,12 @@ async def export_story(
     layout = req.layout if req else {}
     html = _inject(
         _VIEWER_TEMPLATE.read_text(encoding="utf-8"),
-        {"snapshot": snapshot, "sceneMap": scene_map, "layout": layout},
+        {
+            "snapshot": snapshot,
+            "sceneMap": scene_map,
+            "layout": layout,
+            "brand": brand_title(),  # 离线导出:品牌名烤进快照(查看器无后端可取)
+        },
     )
     filename = _safe_filename(str(snapshot.get("title") or story_id)) + ".html"
     return HTMLResponse(

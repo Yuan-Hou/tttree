@@ -131,7 +131,8 @@ async def _gemini_generate(im, *, final_prompt, ref_files) -> bytes:
     base_url, key = resolve_endpoint(im.endpoint_id)
     if not key:
         raise ImageGenError(
-            f"接入点 {im.endpoint_id!r} 未配置 API key(本站点服务需 .env 的 GOOGLE_API_KEY,或在全局设置自填)"
+            f"接入点 {im.endpoint_id!r} 无可用 key:本站点服务的 new-api 模型 key 尚未就绪"
+            "(重新登录可自动补齐),或在全局设置切到「自定义」填自己的 key"
         )
     url = base_url.rstrip("/") + f"/models/{im.model}:generateContent"
 

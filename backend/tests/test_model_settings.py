@@ -29,35 +29,50 @@ def _bb():
             "scenes": {}, "characters": {}, "items": {}, "notes": []}
 
 
-# ── 接入层:解析 ──────────────────────────────────────────────
+# ── 接入层:解析(本站点服务经 new-api 网关、按用户 token;不再用 .env 官方 key)──
 def test_resolve_chat_maps_provider_and_model(monkeypatch):
-    from app.config import settings
+    from app.auth.context import current_uid
 
-    monkeypatch.setattr(settings, "openai_api_key", "sk-test", raising=False)
+    monkeypatch.setattr("app.config.settings.new_api_base_url", "https://gw.test", raising=False)
+    tok = current_uid.set("1")  # conftest 已为 1 号置本站点服务 key = sk-test-site
+    try:
+        ds_client, ds_model = resolve_chat("deepseek-v4-pro")
+        assert ds_model == "deepseek-v4-pro"
+        assert str(ds_client.base_url).startswith("https://gw.test/v1")
+        assert ds_client.api_key == "sk-test-site"  # 用户的 new-api token,不再是 .env 官方 key
 
-    ds_client, ds_model = resolve_chat("deepseek-v4-pro")
-    assert ds_model == settings.deepseek_model
-    assert "deepseek" in str(ds_client.base_url)
-
-    oa_client, oa_model = resolve_chat("gpt-5.5")
-    assert oa_model == "gpt-5.5"
-    assert "openai" in str(oa_client.base_url)
+        oa_client, oa_model = resolve_chat("gpt-5.5")
+        assert oa_model == "gpt-5.5"
+        assert str(oa_client.base_url).startswith("https://gw.test/v1")
+    finally:
+        current_uid.reset(tok)
 
 
-def test_resolve_chat_unknown_falls_back_to_default():
-    _, model = resolve_chat(None)
-    _, model2 = resolve_chat("nonsense-model")
-    assert model == model2  # 都回落默认(deepseek),不崩
+def test_resolve_chat_unknown_falls_back_to_default(monkeypatch):
+    from app.auth.context import current_uid
+
+    monkeypatch.setattr("app.config.settings.new_api_base_url", "https://gw.test", raising=False)
+    tok = current_uid.set("1")
+    try:
+        _, model = resolve_chat(None)
+        _, model2 = resolve_chat("nonsense-model")
+        assert model == model2  # 都回落默认(deepseek),不崩
+    finally:
+        current_uid.reset(tok)
 
 
 def test_resolve_chat_maps_glm_to_zai(monkeypatch):
-    """子步一:GLM 走 Z.ai 的 OpenAI 兼容端点,与 gpt-5.5 同一条 AsyncOpenAI 路径。"""
-    from app.config import settings
+    """GLM(Z.ai)与 gpt-5.5 同走 new-api 的 OpenAI 兼容路径(按模型名路由),共用同一份用户 token。"""
+    from app.auth.context import current_uid
 
-    monkeypatch.setattr(settings, "zai_api_key", "zai-test", raising=False)
-    client, model = resolve_chat("glm-5.1")
-    assert model == "glm-5.1"
-    assert "z.ai" in str(client.base_url)
+    monkeypatch.setattr("app.config.settings.new_api_base_url", "https://gw.test", raising=False)
+    tok = current_uid.set("1")
+    try:
+        client, model = resolve_chat("glm-5.1")
+        assert model == "glm-5.1"
+        assert str(client.base_url).startswith("https://gw.test/v1")
+    finally:
+        current_uid.reset(tok)
 
 
 def test_glm_choices_known_and_listed():

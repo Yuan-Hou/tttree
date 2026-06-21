@@ -20,7 +20,9 @@ from app.assets.reference_store import (
 from app.db.models import ReferenceAsset, Story
 from app.web.deps import get_session
 
-router = APIRouter(prefix="/story", tags=["references"])
+from app.web.auth_deps import require_story_owner
+
+router = APIRouter(prefix="/story", tags=["references"], dependencies=[Depends(require_story_owner)])
 
 
 def _ser(a: ReferenceAsset) -> dict:

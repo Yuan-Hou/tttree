@@ -4,4 +4,6 @@ __pycache__/
 .venv/
 venv/
 *.db
+*.bak-*
 storage/
+auth_users.toml

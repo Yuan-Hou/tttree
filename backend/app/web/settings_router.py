@@ -14,7 +14,9 @@ from app.stories.settings_store import (
 )
 from app.web.deps import get_session
 
-router = APIRouter(prefix="/story", tags=["settings"])
+from app.web.auth_deps import require_story_owner
+
+router = APIRouter(prefix="/story", tags=["settings"], dependencies=[Depends(require_story_owner)])
 
 
 class SettingsReq(BaseModel):

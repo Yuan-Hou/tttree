@@ -94,7 +94,8 @@ def _client_for_provider(provider_name: str) -> AsyncOpenAI:
     base_url, key = resolve_endpoint(endpoint_id)
     if not key:
         raise RuntimeError(
-            f"接入点 {endpoint_id!r} 未配置 API key(本站点服务需 .env,或在全局设置自填)"
+            f"接入点 {endpoint_id!r} 无可用 key:本站点服务的 new-api 模型 key 尚未就绪"
+            "(重新登录可自动补齐),或在全局设置切到「自定义」填自己的 key"
         )
     return _openai_client(base_url, key)
 
@@ -134,7 +135,8 @@ def _anthropic_client():
     base_url, key = resolve_endpoint("anthropic")
     if not key:
         raise RuntimeError(
-            "接入点 'anthropic' 未配置 API key(本站点服务需 .env 的 CLAUDE_API_KEY,或在全局设置自填)"
+            "接入点 'anthropic' 无可用 key:本站点服务的 new-api 模型 key 尚未就绪"
+            "(重新登录可自动补齐),或在全局设置切到「自定义」填自己的 key"
         )
     return _anthropic_client_for(base_url, key)
 

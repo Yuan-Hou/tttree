@@ -22,6 +22,17 @@ from app.stories.store import create_story, fork_story
 _PNG = base64.b64encode(b"\x89PNG\r\n\x1a\nFAKE").decode()
 
 
+@pytest.fixture(autouse=True)
+def _as_user_1():
+    """执行层经 resolve_endpoint 本站点服务取 key,需要请求上下文里有 uid。本模块统一以 1 号用户跑;
+    conftest 已为 1 号预置本站点服务 key = sk-test-site。"""
+    from app.auth.context import current_uid
+
+    tok = current_uid.set("1")
+    yield
+    current_uid.reset(tok)
+
+
 async def _session(tmp_path, name="im.db"):
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / name}")
     await create_all(engine)
@@ -89,10 +100,9 @@ async def test_execute_openai_default(tmp_path, monkeypatch):
 
 # ── 执行层:Gemini 路径(文生图 + 参考图) ─────────────────────
 async def test_execute_gemini_text_to_image(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.config.settings.google_api_key", "sk-g", raising=False)
     from app.llm import endpoints
 
-    endpoints.set_overrides({})
+    endpoints.clear_all_overrides()
     captured = {}
 
     class _R:
@@ -124,17 +134,16 @@ async def test_execute_gemini_text_to_image(tmp_path, monkeypatch):
     )
     assert res.api_call == "generate"
     assert (tmp_path / res.output_path).read_bytes()
-    # 请求形状:走 generateContent,带 IMAGE 模态,鉴权用 x-goog-api-key
+    # 请求形状:走 generateContent,带 IMAGE 模态,鉴权用 x-goog-api-key(= 用户的 new-api token)
     assert ":generateContent" in captured["url"]
-    assert captured["headers"]["x-goog-api-key"] == "sk-g"
+    assert captured["headers"]["x-goog-api-key"] == "sk-test-site"
     assert captured["json"]["generationConfig"]["responseModalities"] == ["IMAGE"]
 
 
 async def test_execute_gemini_with_reference_images(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.config.settings.google_api_key", "sk-g", raising=False)
     from app.llm import endpoints
 
-    endpoints.set_overrides({})
+    endpoints.clear_all_overrides()
     ref = tmp_path / "ref.png"
     ref.write_bytes(b"\x89PNG\r\n\x1a\nREF")
     captured = {}
@@ -173,10 +182,9 @@ async def test_execute_gemini_with_reference_images(tmp_path, monkeypatch):
 
 
 async def test_execute_gemini_error_on_no_image(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.config.settings.google_api_key", "sk-g", raising=False)
     from app.llm import endpoints
 
-    endpoints.set_overrides({})
+    endpoints.clear_all_overrides()
 
     class _R:
         status_code = 200

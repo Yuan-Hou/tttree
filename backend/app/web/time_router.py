@@ -29,7 +29,9 @@ from app.web.deps import get_session
 from app.web.jobs import start_turn_job, turn_active
 from app.web.sse import sse
 
-router = APIRouter(prefix="/story", tags=["time"])
+from app.web.auth_deps import require_story_owner
+
+router = APIRouter(prefix="/story", tags=["time"], dependencies=[Depends(require_story_owner)])
 
 
 def _loads(raw: str):

@@ -5,9 +5,12 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.config import brand_title, settings
 from app.db.session import async_session, create_all, engine
 from app.global_settings_store import load_overrides_into_memory
+from app.newapi.store import load_site_keys_into_memory
 from app.storage import STORAGE_ROOT, ensure_dirs
+from app.web.auth_router import router as auth_router
 from app.web.bibles_router import router as bibles_router
 from app.web.draw_router import router as draw_router
 from app.web.export_router import router as export_router
@@ -31,12 +34,15 @@ async def lifespan(app: FastAPI):
     await create_all(engine)
     ensure_dirs()
     # 全局设置:把库里自填的接入点配置载入内存覆盖表,供 registry 取用。
+    # new-api:把各用户的本站点服务模型 key 载入内存(供 resolve_endpoint 本站点服务用)。
     async with async_session() as session:
         await load_overrides_into_memory(session)
+        await load_site_keys_into_memory(session)
     yield
 
 
-app = FastAPI(title="Vore Tree Backend", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title=f"{brand_title()} Backend", version="0.4.0", lifespan=lifespan)
+app.include_router(auth_router)
 app.include_router(stories_router)
 app.include_router(turn_router)
 app.include_router(draw_router)
@@ -60,6 +66,12 @@ if (_SPA_DIR / "index.html").exists():
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/brand")
+async def brand() -> dict[str, str]:
+    """站点品牌名(公开,无需登录)。前端同步后本地缓存,展示「{name} Tree」(name 空 → 仅「Tree」)。"""
+    return {"name": settings.site_name, "title": brand_title()}
 
 
 @app.get("/")

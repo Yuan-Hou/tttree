@@ -1,0 +1,26 @@
+# 构建上下文裁剪:别把这些塞进镜像 / 拖慢构建。
+.git
+.claude
+**/node_modules
+**/dist
+**/dist-viewer
+**/__pycache__
+**/*.pyc
+
+# 外部参考仓库(69M,绝不入镜像)
+reference/
+
+# 后端可变/私有状态:运行时来自卷或环境,不进镜像
+backend/.venv
+backend/*.db
+backend/*.db.bak-*
+backend/*.bak-*
+backend/storage/
+backend/auth_users.toml
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# 本地杂项
+**/.DS_Store
+*.log

@@ -1,0 +1,50 @@
+# 自托管编排:app(FastAPI + 两前端,单进程)+ db(Postgres)。反代/TLS 由你自有的那层在前面接,
+# 这里只把 app 暴露在 8000。密钥走 backend/.env;变量替换(${...})读仓库根 .env 或 shell 环境。
+#
+# 首次:  docker compose up --build -d   →  访问 http://<host>:8000/  (跳 /login)
+# 升级:  git pull && docker compose up --build -d   (entrypoint 自动 alembic upgrade head)
+# 从旧 SQLite 迁数据:见 backend/scripts/migrate_sqlite_to_pg.py
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vore
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vore}
+      POSTGRES_DB: voretree
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vore -d voretree"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - backend/.env # APP_SECRET / NEW_API_* / SITE_NAME 等(env_file 不含 DATABASE_URL —— 下面显式给)
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vore:${POSTGRES_PASSWORD:-vore}@db:5432/voretree
+      # 首启管理员:DB 空且无 toml 时种出 1 号管理员;之后增删改用户走管理控制台。
+      ADMIN_NAME: ${ADMIN_NAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+    volumes:
+      - storage:/srv/backend/storage # 生成图/参考图持久化(DB 在 postgres,不落此卷)
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  storage:

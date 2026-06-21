@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     # URL 占位/候选 + 模型名常量保留。
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-pro"
-    openai_image_model: str = "gpt-image-2-2026-04-21"  # 生产快照,不用滚动 alias
+    # openai_image_model: str = "gpt-image-2-2026-04-21"  # 生产快照,不用滚动 alias
+    openai_image_model: str = "gpt-image-2"  # 滚动 alias,指向最新可用的 openai 图像模型
     openai_base_url: str | None = None
     zai_base_url: str = "https://api.z.ai/api/paas/v4"
     google_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"

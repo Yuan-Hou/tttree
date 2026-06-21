@@ -22,6 +22,7 @@ export default defineConfig({
       ...proxy("/story"),
       ...proxy("/storage"),
       ...proxy("/health"),
+      ...proxy("/auth"),
       ...proxy("/global-settings"),
     },
   },

@@ -198,7 +198,7 @@ export interface StorySettings {
 }
 
 // 故事内设置面板的分区 id(SettingsPanel 左栏)。工作台「数据源」节点据此直达对应分区。
-export type SettingsSection = "model" | "knowledge" | "style" | "visual" | "gallery" | "global";
+export type SettingsSection = "model" | "knowledge" | "style" | "visual" | "gallery";
 
 // ── 全局设置:接入点供应商配置(全站单例)──
 export interface GlobalEndpoint {
@@ -206,14 +206,25 @@ export interface GlobalEndpoint {
   label: string;
   group: string; // 供应商品牌(UI 分组)
   mode: "site" | "custom";
-  site_base_url: string; // 本站点服务用的默认 URL
+  site_base_url: string; // 官方默认 URL(仅作自定义模式占位/候选)
+  site_effective_base: string; // 本站点服务实际经 new-api 的 URL
   presets: string[]; // 自定义时的 URL 下拉候选
   base_url: string; // 当前 URL(custom 回显已存;site 给默认占位)
   key_set: boolean; // 是否已存自填 key
   key_masked: string; // 掩码(如 ••••x9);从不回传明文
 }
+// new-api 对应账户余额(账户设置里展示)
+export interface Balance {
+  ready: boolean; // 是否已补齐 new-api 账号
+  quota: number; // 剩余额度(原始单位)
+  used_quota: number; // 已用额度
+  balance_usd: number; // 剩余额度折算美元
+  error: string | null; // 取数失败原因(此时数值不可信)
+}
 export interface GlobalSettings {
   crypto_available: boolean; // APP_SECRET 是否已配置(决定能否自填 key)
+  new_api_base_url: string; // 本站点服务背后的 new-api 网关地址
+  new_api_ready: boolean; // 当前用户的 new-api 模型 key 是否已就绪(否则本站点服务调用会报错)
   endpoints: GlobalEndpoint[];
 }
 // PUT 单个接入点的改动

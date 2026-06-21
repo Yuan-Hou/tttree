@@ -16,6 +16,7 @@ interface ExportData {
   snapshot: Snapshot;
   sceneMap: SceneMapData;
   layout?: NodePositions;
+  brand?: string; // 导出时烤入的品牌名「{Name} Tree」(离线查看器无后端可取)
 }
 declare global {
   interface Window {
@@ -38,9 +39,10 @@ function installFetchShim({ snapshot, sceneMap }: ExportData) {
   };
 }
 
-function Viewer({ snapshot, sceneMap }: ExportData) {
+function Viewer({ snapshot, sceneMap, brand }: ExportData) {
+  const brandLabel = brand?.trim() || "Tree";
   const storyId = snapshot.story_id;
-  const title = snapshot.title || sceneMap.current_scene || "vore-tree";
+  const title = snapshot.title || sceneMap.current_scene || brandLabel;
   const turns = useMemo(() => snapshotToTurns(snapshot), [snapshot]);
   const portrait = usePortrait();
   const [mapOpen, setMapOpen] = useState(true);
@@ -66,7 +68,7 @@ function Viewer({ snapshot, sceneMap }: ExportData) {
     <div className="flex h-full w-full flex-col bg-paper text-ink">
       <header className="flex shrink-0 items-baseline gap-3 border-b border-line px-5 py-3 sm:px-8">
         <span className="font-serif text-[14px] font-medium tracking-tight text-accent-ink">
-          <span className="text-accent">❡</span> vore-tree
+          <span className="text-accent">❡</span> {brandLabel}
         </span>
         <span className="truncate font-serif text-[17px] text-ink">{title}</span>
         <span className="ml-auto shrink-0 font-mono text-[11px] text-ink-faint">
@@ -113,7 +115,7 @@ function Viewer({ snapshot, sceneMap }: ExportData) {
 function NoData() {
   return (
     <div className="flex h-full w-full items-center justify-center px-8 text-center text-[13px] text-ink-faint">
-      没有可显示的故事数据。这是 vore-tree 的导出查看器,需由后端导出接口注入冻结快照后才能浏览。
+      没有可显示的故事数据。这是导出查看器,需由后端导出接口注入冻结快照后才能浏览。
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
+import { getName, getUid, logout } from "./auth";
+import { useBrandTitle } from "./brand";
 import { useStoryEngine } from "./useStoryEngine";
 import { useLayout, type DragWhich } from "./useLayout";
 import { usePortrait } from "./usePortrait";
@@ -15,6 +17,7 @@ import { DrawDeck } from "./components/DrawDeck";
 import { ManualDeck } from "./components/ManualDeck";
 import { Workbench } from "./components/Workbench";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { AccountSettings } from "./components/AccountSettings";
 import { SceneMap } from "./components/SceneMap";
 import { Eyebrow } from "./components/ui";
 
@@ -30,6 +33,15 @@ export function App() {
   const [mapOpen, setMapOpen] = useState(true); // 竖屏:地图可折叠
   const [shelfOverlay, setShelfOverlay] = useState(false); // 竖屏:书架抽屉
   const [exporting, setExporting] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false); // 账户设置覆盖层(从书架用户菜单进)
+  const username = getName() ?? getUid() ?? "?";
+  const brand = useBrandTitle();
+  useEffect(() => {
+    document.title = `${brand} · 图文小说创作台`;
+  }, [brand]);
+  const onLogout = () => {
+    if (window.confirm("退出登录?")) logout();
+  };
 
   // 导出整卷故事为单文件 HTML(只读浏览版)→ 触发下载。
   const doExport = useCallback(async () => {
@@ -138,6 +150,9 @@ export function App() {
               onCreate={e.createStory}
               onDelete={e.removeStory}
               onCollapse={layout.toggleCollapsed}
+              username={username}
+              onOpenAccount={() => setAccountOpen(true)}
+              onLogout={onLogout}
             />
           </aside>
           <Divider which="shelf" onStart={layout.startDrag} />
@@ -160,7 +175,7 @@ export function App() {
             </button>
           )}
           <span className="font-serif text-[15px] font-medium tracking-tight text-accent-ink">
-            <span className="text-accent">❡</span> vore-tree
+            <span className="text-accent">❡</span> {brand}
           </span>
           {e.curId ? (
             <>
@@ -364,6 +379,12 @@ export function App() {
               onCreate={e.createStory}
               onDelete={e.removeStory}
               onCollapse={() => setShelfOverlay(false)}
+              username={username}
+              onOpenAccount={() => {
+                setShelfOverlay(false);
+                setAccountOpen(true);
+              }}
+              onLogout={onLogout}
             />
           </aside>
         </div>
@@ -411,6 +432,9 @@ export function App() {
           initialSection={e.settingsSection}
         />
       )}
+
+      {/* 账户设置:余额 + 模型供应接入点(账户级,与故事无关)。从书架用户菜单进。 */}
+      {accountOpen && <AccountSettings username={username} onClose={() => setAccountOpen(false)} />}
     </div>
   );
 }

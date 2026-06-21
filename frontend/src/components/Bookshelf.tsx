@@ -9,10 +9,24 @@ interface Props {
   onCreate: (title: string) => void;
   onDelete: (id: string) => void;
   onCollapse: () => void;
+  username: string;
+  onOpenAccount: () => void;
+  onLogout: () => void;
 }
 
-export function Bookshelf({ stories, curId, onSelect, onCreate, onDelete, onCollapse }: Props) {
+export function Bookshelf({
+  stories,
+  curId,
+  onSelect,
+  onCreate,
+  onDelete,
+  onCollapse,
+  username,
+  onOpenAccount,
+  onLogout,
+}: Props) {
   const [title, setTitle] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const submit = () => {
     const t = title.trim();
     if (!t) return;
@@ -98,6 +112,48 @@ export function Bookshelf({ stories, curId, onSelect, onCreate, onDelete, onColl
             种下
           </Button>
         </div>
+      </div>
+
+      {/* 用户栏:点击展开菜单(设置 / 退出登录) */}
+      <div className="relative border-t border-line p-2">
+        {menuOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+            <div className="absolute bottom-full left-2 right-2 z-20 mb-1 overflow-hidden rounded-lg border border-line-strong bg-paper shadow-[0_12px_30px_-12px_rgba(28,37,48,0.4)]">
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpenAccount();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-soft transition hover:bg-sunken hover:text-ink"
+              >
+                <span className="text-accent">⚙</span> 设置
+              </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  onLogout();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-soft transition hover:bg-sunken hover:text-danger"
+              >
+                <span>⏻</span> 退出登录
+              </button>
+            </div>
+          </>
+        )}
+        <button
+          onClick={() => setMenuOpen((v) => !v)}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 transition ${
+            menuOpen ? "bg-sunken" : "hover:bg-sunken"
+          }`}
+          title="账户菜单"
+        >
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-soft font-mono text-[11px] text-accent-ink">
+            {(username[0] || "?").toUpperCase()}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-left text-[13px] text-ink">{username}</span>
+          <span className="font-mono text-[10px] text-ink-faint">⌄</span>
+        </button>
       </div>
     </div>
   );

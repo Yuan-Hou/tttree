@@ -202,7 +202,10 @@ export const saveSettings = (
     },
   );
 
-// ── 全局设置:接入点供应商配置(全站单例,不随故事)──
+// ── 账户:当前用户在 new-api 对应账户的余额 ──
+export const getBalance = () => jget<import("./types").Balance>(`/auth/balance`);
+
+// ── 全局设置:接入点供应商配置(按当前登录用户,不随故事)──
 export const getGlobalSettings = () => jget<GlobalSettings>(`/global-settings`);
 
 export const saveGlobalSettings = (endpoints: Record<string, EndpointChange>) =>

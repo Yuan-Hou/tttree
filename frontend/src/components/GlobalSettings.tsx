@@ -20,6 +20,7 @@ export function GlobalSettings() {
   const [endpoints, setEndpoints] = useState<GlobalEndpoint[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [cryptoOk, setCryptoOk] = useState(true);
+  const [newApiReady, setNewApiReady] = useState(true);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -33,6 +34,7 @@ export function GlobalSettings() {
         if (!alive.v) return;
         setEndpoints(g.endpoints);
         setCryptoOk(g.crypto_available);
+        setNewApiReady(g.new_api_ready);
         setDrafts(Object.fromEntries(g.endpoints.map((e) => [e.id, toDraft(e)])));
       })
       .catch((e) => alive.v && setErr(String(e)))
@@ -87,6 +89,7 @@ export function GlobalSettings() {
       const g = await saveGlobalSettings(body);
       setEndpoints(g.endpoints);
       setCryptoOk(g.crypto_available);
+      setNewApiReady(g.new_api_ready);
       setDrafts(Object.fromEntries(g.endpoints.map((e) => [e.id, toDraft(e)])));
       setSavedTick(true);
       setTimeout(() => setSavedTick(false), 1600);
@@ -103,9 +106,17 @@ export function GlobalSettings() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <p className="text-[12.5px] leading-relaxed text-ink-soft">
-        各供应商接入点的 endpoint 与 API key。默认「使用本站点服务」——走本站点自有的 key,你无需填写。
-        切到「自定义」可指向自己的网关并填自己的 key（加密保存，本页只显示掩码）。此设置全站共享,不随故事。
+        各供应商接入点的 endpoint 与 API key。默认「本站点服务」——经 new-api 网关、用你的专属 token,
+        登录时自动补齐,你无需填写。切到「自定义」可指向自己的网关并填自己的 key（加密保存，本页只显示掩码）。
+        此设置按你的账号隔离,不随故事。
       </p>
+
+      {!newApiReady && (
+        <p className="rounded-lg border border-line bg-paper px-3 py-2 text-[11.5px] leading-snug text-danger">
+          你的 new-api 模型 key 尚未就绪——「本站点服务」此刻不可用(重新登录会自动补齐;
+          或切到「自定义」填你自己的 key)。
+        </p>
+      )}
 
       {!cryptoOk && (
         <p className="rounded-lg border border-line bg-paper px-3 py-2 text-[11.5px] leading-snug text-danger">
@@ -131,7 +142,7 @@ export function GlobalSettings() {
                   </div>
                   {!custom && (
                     <div className="mt-0.5 truncate font-mono text-[10.5px] text-ink-faint">
-                      本站点服务 · {e.site_base_url}
+                      本站点服务 · 经 new-api · {e.site_effective_base}
                     </div>
                   )}
                 </div>

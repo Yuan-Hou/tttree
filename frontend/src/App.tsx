@@ -34,7 +34,7 @@ export function App() {
   const [shelfOverlay, setShelfOverlay] = useState(false); // 竖屏:书架抽屉
   const [exporting, setExporting] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false); // 账户设置覆盖层(从书架用户菜单进)
-  const username = getName() ?? getUid() ?? "?";
+  const [username, setUsername] = useState(getName() ?? getUid() ?? "?"); // 改昵称后即时刷新书架页脚
   const brand = useBrandTitle();
   useEffect(() => {
     document.title = `${brand} · 图文小说创作台`;
@@ -434,7 +434,13 @@ export function App() {
       )}
 
       {/* 账户设置:余额 + 模型供应接入点(账户级,与故事无关)。从书架用户菜单进。 */}
-      {accountOpen && <AccountSettings username={username} onClose={() => setAccountOpen(false)} />}
+      {accountOpen && (
+        <AccountSettings
+          username={username}
+          onClose={() => setAccountOpen(false)}
+          onNameChange={setUsername}
+        />
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from app.auth import users as users_mod
+from app.auth.passwords import hash_password
 from app.auth.users import User
 from app.db.session import create_all, make_engine, make_session_factory
 
@@ -17,7 +18,10 @@ pytestmark = pytest.mark.real_auth
 def _setup(monkeypatch):
     monkeypatch.setattr("app.config.settings.app_secret", "test-auth-secret", raising=False)
     users_mod.set_users_for_test(
-        {"1": User("1", "admin", "pw-admin"), "2": User("2", "bob", "pw-bob")}
+        {
+            "1": User("1", "admin", hash_password("pw-admin"), is_admin=True),
+            "2": User("2", "bob", hash_password("pw-bob")),
+        }
     )
 
 
@@ -73,7 +77,7 @@ async def test_me_with_token(tmp_path, monkeypatch):
         tok = (await c.post("/auth/login", json={"name": "bob", "password": "pw-bob"})).json()["token"]
         r = await c.get("/auth/me", headers={"Authorization": f"Bearer {tok}"})
         assert r.status_code == 200
-        assert r.json() == {"uid": "2", "name": "bob"}
+        assert r.json() == {"uid": "2", "name": "bob", "is_admin": False}
 
 
 async def test_token_from_other_secret_rejected(tmp_path, monkeypatch):
@@ -85,6 +89,56 @@ async def test_token_from_other_secret_rejected(tmp_path, monkeypatch):
     async with await _client(tmp_path, monkeypatch) as c:
         r = await c.get("/auth/me", headers={"Authorization": f"Bearer {tok}"})
         assert r.status_code == 401
+
+
+async def _client_with_db(tmp_path, monkeypatch):
+    """像 _client,但同时把缓存里的用户落进临时 DB(自助/管理变更走 session.get 需要 DB 行)。"""
+    from app.db.models import User as UserRow
+
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'auth.db'}")
+    await create_all(engine)
+    Session = make_session_factory(engine)
+    monkeypatch.setattr("app.db.session.async_session", Session)
+    async with Session() as s:
+        for u in users_mod.list_users():
+            s.add(UserRow(id=u.id, name=u.name, password_hash=u.password_hash, is_admin=u.is_admin, banned=u.banned))
+        await s.commit()
+    from app.main import app
+
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+
+
+async def test_change_own_nickname(tmp_path, monkeypatch):
+    _setup(monkeypatch)
+    async with await _client_with_db(tmp_path, monkeypatch) as c:
+        tok = (await c.post("/auth/login", json={"name": "bob", "password": "pw-bob"})).json()["token"]
+        h = {"Authorization": f"Bearer {tok}"}
+        r = await c.patch("/auth/me", json={"name": "bobby"}, headers=h)
+        assert r.status_code == 200 and r.json()["name"] == "bobby"
+        # 新名能登录、旧名不能
+        assert (await c.post("/auth/login", json={"name": "bobby", "password": "pw-bob"})).status_code == 200
+        assert (await c.post("/auth/login", json={"name": "bob", "password": "pw-bob"})).status_code == 401
+
+
+async def test_change_nickname_conflict(tmp_path, monkeypatch):
+    _setup(monkeypatch)
+    async with await _client_with_db(tmp_path, monkeypatch) as c:
+        tok = (await c.post("/auth/login", json={"name": "bob", "password": "pw-bob"})).json()["token"]
+        r = await c.patch("/auth/me", json={"name": "admin"}, headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 409
+
+
+async def test_change_own_password(tmp_path, monkeypatch):
+    _setup(monkeypatch)
+    async with await _client_with_db(tmp_path, monkeypatch) as c:
+        tok = (await c.post("/auth/login", json={"name": "bob", "password": "pw-bob"})).json()["token"]
+        h = {"Authorization": f"Bearer {tok}"}
+        # 旧口令错 → 400
+        assert (await c.post("/auth/me/password", json={"old_password": "nope", "new_password": "x2"}, headers=h)).status_code == 400
+        # 正确旧口令 → 204,随后新口令可登、旧口令不可登
+        assert (await c.post("/auth/me/password", json={"old_password": "pw-bob", "new_password": "new-pw"}, headers=h)).status_code == 204
+        assert (await c.post("/auth/login", json={"name": "bob", "password": "new-pw"})).status_code == 200
+        assert (await c.post("/auth/login", json={"name": "bob", "password": "pw-bob"})).status_code == 401
 
 
 def test_jwt_roundtrip(monkeypatch):

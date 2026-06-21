@@ -6,7 +6,10 @@ anthropic>=0.40  # Claude(Anthropic 原生,非 OpenAI 兼容)—— 子步二适
 pydantic>=2.8
 pydantic-settings>=2.4
 sqlalchemy[asyncio]>=2.0
-aiosqlite>=0.20
+aiosqlite>=0.20  # 本地/测试默认 DB(留空 DATABASE_URL 时回退到 backend/vore.db)
+asyncpg>=0.30  # 部署默认 DB:Postgres 异步驱动(DATABASE_URL=postgresql+asyncpg://…)
+alembic>=1.13  # DB schema 迁移(基线 + 增量;env.py 从 DATABASE_URL 取连接)
 Pillow>=10.0  # 导出时把插画重压成 webp 内联进单文件 HTML
 cryptography>=43.0  # 全局设置:自填供应商 API key 落库前用 APP_SECRET 对称加密(Fernet)
 PyJWT>=2.8  # 用户系统:登录令牌(HMAC-SHA256,密钥复用 APP_SECRET)
+bcrypt>=4.0  # 用户系统:DB 里用户口令的哈希(替代 toml 明文)

@@ -1,10 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { getBalance } from "../api";
 import type { Balance } from "../types";
 import { GlobalSettings } from "./GlobalSettings";
+import { PersonalInfo } from "./PersonalInfo";
 
-/** 账户设置(账户级,与故事无关):new-api 余额 + 模型供应接入点配置(原「全局设置」迁来此处)。 */
-export function AccountSettings({ username, onClose }: { username: string; onClose: () => void }) {
+type Tab = "providers" | "profile";
+
+/** 账户设置(账户级,与故事无关)。两栏:
+ *  - 模型供应商:new-api 余额 + 接入点配置(原「全局设置」)
+ *  - 个人信息与安全:改昵称 / 改密码 */
+export function AccountSettings({
+  username,
+  onClose,
+  onNameChange,
+}: {
+  username: string;
+  onClose: () => void;
+  onNameChange?: (name: string) => void;
+}) {
+  const [tab, setTab] = useState<Tab>("providers");
   const [bal, setBal] = useState<Balance | null>(null);
   const [balErr, setBalErr] = useState<string | null>(null);
 
@@ -43,15 +57,45 @@ export function AccountSettings({ username, onClose }: { username: string; onClo
           </button>
         </header>
 
+        <nav className="flex gap-1 border-b border-line bg-surface px-4">
+          <TabBtn active={tab === "providers"} onClick={() => setTab("providers")}>
+            模型供应商
+          </TabBtn>
+          <TabBtn active={tab === "profile"} onClick={() => setTab("profile")}>
+            个人信息与安全
+          </TabBtn>
+        </nav>
+
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
-          <BalanceCard bal={bal} err={balErr} />
-          <div className="flex min-h-0 flex-col">
-            <div className="mb-2 font-serif text-[14px] text-accent-ink">模型供应</div>
-            <GlobalSettings />
-          </div>
+          {tab === "providers" ? (
+            <>
+              <BalanceCard bal={bal} err={balErr} />
+              <div className="flex min-h-0 flex-col">
+                <div className="mb-2 font-serif text-[14px] text-accent-ink">模型供应</div>
+                <GlobalSettings />
+              </div>
+            </>
+          ) : (
+            <PersonalInfo username={username} onNameChange={onNameChange} />
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-3.5 py-2.5 text-[13px] transition ${
+        active
+          ? "border-accent font-medium text-accent-ink"
+          : "border-transparent text-ink-soft hover:text-ink"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

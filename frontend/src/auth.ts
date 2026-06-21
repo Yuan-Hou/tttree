@@ -12,6 +12,8 @@ export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
 export const getUid = (): string | null => localStorage.getItem(UID_KEY);
 /** 登录名(交接时带上)。老会话未存 → null,调用方回退到 uid。 */
 export const getName = (): string | null => localStorage.getItem(NAME_KEY);
+/** 改昵称后更新本地缓存(昵称 = 登录名同一字段)。 */
+export const setName = (name: string): void => localStorage.setItem(NAME_KEY, name);
 
 function setSession(token: string, uid: string, name: string): void {
   localStorage.setItem(TOKEN_KEY, token);

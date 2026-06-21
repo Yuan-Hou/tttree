@@ -14,6 +14,7 @@ export default defineConfig({
     watch: { usePolling: true, interval: 300 }, // WSL2 /mnt 盘:inotify 不触发,轮询兜底
     proxy: {
       "/auth": { target: API, changeOrigin: true },
+      "/admin": { target: API, changeOrigin: true },
       "/brand": { target: API, changeOrigin: true },
     },
   },

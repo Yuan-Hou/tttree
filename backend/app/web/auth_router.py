@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.tokens import AuthConfigError, make_token
-from app.auth.users import authenticate, get_user
+from app.auth.passwords import verify_password
+from app.auth.users import authenticate, get_user, name_exists, set_name, set_password
 from app.config import settings
 from app.llm.endpoints import set_user_site_key
 from app.newapi.client import NewApiError, get_user_quota
@@ -43,11 +44,22 @@ class LoginResp(BaseModel):
     token: str
     uid: str
     name: str
+    is_admin: bool = False
 
 
 class MeResp(BaseModel):
     uid: str
     name: str
+    is_admin: bool = False
+
+
+class UpdateMeReq(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+class ChangePasswordReq(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 class BalanceResp(BaseModel):
@@ -68,13 +80,44 @@ async def login(req: LoginReq, session: AsyncSession = Depends(get_session)) -> 
     except AuthConfigError:
         raise HTTPException(status_code=503, detail="服务未配置 APP_SECRET")
     await _ensure_site_key(session, user.id)  # 惰性补齐 new-api(失败不阻断)
-    return LoginResp(token=token, uid=user.id, name=user.name)
+    return LoginResp(token=token, uid=user.id, name=user.name, is_admin=user.is_admin)
 
 
 @router.get("/me", response_model=MeResp)
 async def me(uid: str = Depends(get_current_user)) -> MeResp:
     user = get_user(uid)  # 依赖已确保 uid 在清单内
-    return MeResp(uid=uid, name=user.name if user else uid)
+    return MeResp(uid=uid, name=user.name if user else uid, is_admin=bool(user and user.is_admin))
+
+
+@router.patch("/me", response_model=MeResp)
+async def update_me(
+    req: UpdateMeReq,
+    uid: str = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> MeResp:
+    """改自己的昵称(= 登录名,同一字段)。名字被他人占用 → 409。"""
+    new_name = req.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="昵称不能为空")
+    if name_exists(new_name, exclude_uid=uid):
+        raise HTTPException(status_code=409, detail="该名字已被占用")
+    user = await set_name(session, uid, new_name)
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return MeResp(uid=uid, name=user.name, is_admin=user.is_admin)
+
+
+@router.post("/me/password", status_code=204)
+async def change_password(
+    req: ChangePasswordReq,
+    uid: str = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """改自己的口令:先校验旧口令,再设新口令。旧口令错 → 400。"""
+    user = get_user(uid)
+    if user is None or not verify_password(req.old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="原口令不正确")
+    await set_password(session, uid, req.new_password)
 
 
 @router.get("/balance", response_model=BalanceResp)

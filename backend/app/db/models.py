@@ -7,7 +7,28 @@ from app.db.base import Base
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    # 朴素 UTC(剥掉 tzinfo):各 DateTime 列是 TIMESTAMP WITHOUT TIME ZONE。SQLite 容忍带时区值,
+    # 但 Postgres/asyncpg 拒绝把 aware datetime 写进 naive 列。全库统一存朴素 UTC,与历史 SQLite 数据一致。
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class User(Base):
+    """登录用户(用户系统)。此前写死在 auth_users.toml,现以本表为持久真相源,toml 仅首装种子。
+
+    id = uid(= Story.owner_id,也是 JWT 载荷)。password_hash 存 bcrypt 哈希(见 app.auth.passwords)。
+    is_admin = 可进管理控制台、用 /admin/* 增删改用户;banned = 软封禁(拒登录 + 既有 token 失效)。
+    name 既是登录名也是展示昵称(同一字段:管理员「改用户名」与用户「改昵称」改的都是它)。
+    进程内另有缓存(app.auth.users),热路径只读缓存以免每次取 session。
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # uid
+    name: Mapped[str] = mapped_column(String, nullable=False)  # 登录名 = 展示昵称
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class Story(Base):
@@ -18,7 +39,7 @@ class Story(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)  # story_id
     title: Mapped[str] = mapped_column(String, nullable=False)
     # 数据归属:用户系统。owner_id = auth_users 里的用户号。所有故事级数据经故事归属隔离;
-    # 旧库迁移把现有故事一律回填 "1"(见 db.session._add_missing_columns)。
+    # 旧 SQLite 库的现有故事在 ETL 迁移时一律回填 "1"(见 scripts/migrate_sqlite_to_pg.py)。
     owner_id: Mapped[str] = mapped_column(String, default="1", index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     last_active_at: Mapped[datetime] = mapped_column(
@@ -160,7 +181,7 @@ class AppSettings(Base):
     {endpoint_id: {"mode": "site"|"custom", "base_url": str, "api_key_enc": str}}。
     site 模式的接入点可不出现在该 dict;custom 项必含 base_url + api_key_enc(密文,见 app.crypto)。
     读出后逐用户解密成内存覆盖表(app.llm.endpoints._OVERRIDES)。
-    旧库的全站单例行(id='singleton')迁移成 1 号用户(见 db.session._add_missing_columns)。
+    旧库的全站单例行(id='singleton')在 ETL 迁移时归到 1 号用户(见 scripts/migrate_sqlite_to_pg.py)。
     """
 
     __tablename__ = "app_settings"

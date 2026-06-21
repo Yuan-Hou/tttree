@@ -1,18 +1,8 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
+import { login as apiLogin, type LoginResp } from "./api";
 
-// 对话前端地址:开发期默认 :5173,部署期默认同源 /app/。可用 VITE_APP_URL 覆盖。
-// 登录成功后重定向到此,token/uid 放 hash 交接(对话前端启动时捕获 → localStorage)。
-const APP_URL: string =
-  import.meta.env.VITE_APP_URL || (import.meta.env.DEV ? "http://localhost:5173/" : "/app/");
-
-interface LoginResp {
-  token: string;
-  uid: string;
-  name: string;
-}
-
-/** 登录页(无注册:用户写死在后端配置文件)。登录拿 {token, uid} → 交接给对话前端。 */
-export function Login() {
+/** 登录页。登录成功后把 {token, uid, name, is_admin} 上抛 App,由 App 决定落地(创作台 / 管理控制台)。 */
+export function Login({ onLoggedIn }: { onLoggedIn: (resp: LoginResp) => void }) {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -41,24 +31,9 @@ export function Login() {
     setBusy(true);
     setErr(null);
     try {
-      const r = await fetch("/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), password }),
-      });
-      if (!r.ok) {
-        const detail =
-          r.status === 401 ? "用户名或口令错误" : `登录失败(${r.status})`;
-        setErr(detail);
-        return;
-      }
-      const data = (await r.json()) as LoginResp;
-      const url =
-        `${APP_URL}#token=${encodeURIComponent(data.token)}` +
-        `&uid=${encodeURIComponent(data.uid)}&name=${encodeURIComponent(data.name)}`;
-      window.location.href = url;
+      onLoggedIn(await apiLogin(name.trim(), password));
     } catch (e2) {
-      setErr(`无法连接服务:${String(e2)}`);
+      setErr(e2 instanceof Error ? e2.message : `无法连接服务:${String(e2)}`);
     } finally {
       setBusy(false);
     }

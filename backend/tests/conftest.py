@@ -11,12 +11,13 @@ import pytest
 
 from app.auth import users as users_mod
 from app.auth.context import current_uid
+from app.auth.passwords import hash_password
 from app.auth.users import User
 
-# 全套测试共用的固定用户。
+# 全套测试共用的固定用户(缓存里存哈希;1 号是管理员)。
 _TEST_USERS = {
-    "1": User("1", "admin", "pw-admin"),
-    "2": User("2", "bob", "pw-bob"),
+    "1": User("1", "admin", hash_password("pw-admin"), is_admin=True),
+    "2": User("2", "bob", hash_password("pw-bob")),
 }
 
 

@@ -205,6 +205,24 @@ export const saveSettings = (
 // ── 账户:当前用户在 new-api 对应账户的余额 ──
 export const getBalance = () => jget<import("./types").Balance>(`/auth/balance`);
 
+// ── 账户:个人信息与安全(改昵称 / 改密码,昵称与登录名同一字段)──
+export const updateMe = (name: string) =>
+  fetch(`/auth/me`, { method: "PATCH", headers: json, body: JSON.stringify({ name }) }).then(
+    async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${(await r.json().catch(() => ({}))).detail || ""}`.trim());
+      return r.json() as Promise<{ uid: string; name: string; is_admin: boolean }>;
+    },
+  );
+
+export const changePassword = (oldPassword: string, newPassword: string) =>
+  fetch(`/auth/me/password`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`${r.status} ${(await r.json().catch(() => ({}))).detail || ""}`.trim());
+  });
+
 // ── 全局设置:接入点供应商配置(按当前登录用户,不随故事)──
 export const getGlobalSettings = () => jget<GlobalSettings>(`/global-settings`);
 

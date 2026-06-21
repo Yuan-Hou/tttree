@@ -32,9 +32,20 @@ async def get_current_user(authorization: str | None = Header(default=None)) -> 
         uid = decode_uid(token)
     except AuthConfigError:
         raise HTTPException(status_code=503, detail="服务未配置 APP_SECRET")
-    if not uid or get_user(uid) is None:
+    user = get_user(uid) if uid else None
+    if user is None:
         raise HTTPException(status_code=401, detail="登录已失效,请重新登录")
+    if user.banned:
+        raise HTTPException(status_code=401, detail="账号已被封禁")
     current_uid.set(uid)
+    return uid
+
+
+async def require_admin(uid: str = Depends(get_current_user)) -> str:
+    """管理控制台路由的闸:仅 is_admin 用户放行,否则 403。"""
+    user = get_user(uid)
+    if user is None or not user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     return uid
 
 

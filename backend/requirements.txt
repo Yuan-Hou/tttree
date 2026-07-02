@@ -13,3 +13,4 @@ Pillow>=10.0  # 导出时把插画重压成 webp 内联进单文件 HTML
 cryptography>=43.0  # 全局设置:自填供应商 API key 落库前用 APP_SECRET 对称加密(Fernet)
 PyJWT>=2.8  # 用户系统:登录令牌(HMAC-SHA256,密钥复用 APP_SECRET)
 bcrypt>=4.0  # 用户系统:DB 里用户口令的哈希(替代 toml 明文)
+pyarrow>=15.0  # 故事迁移包:把整故事各表导出/导入为 parquet(打进单个 .zip,含图片二进制)

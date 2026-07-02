@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { StoryInfo } from "../types";
 import { Button, Eyebrow } from "./ui";
 
@@ -7,6 +7,7 @@ interface Props {
   curId: string | null;
   onSelect: (id: string) => void;
   onCreate: (title: string) => void;
+  onImport: (file: File) => void;
   onDelete: (id: string) => void;
   onCollapse: () => void;
   username: string;
@@ -19,6 +20,7 @@ export function Bookshelf({
   curId,
   onSelect,
   onCreate,
+  onImport,
   onDelete,
   onCollapse,
   username,
@@ -27,6 +29,7 @@ export function Bookshelf({
 }: Props) {
   const [title, setTitle] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const submit = () => {
     const t = title.trim();
     if (!t) return;
@@ -112,6 +115,25 @@ export function Bookshelf({
             种下
           </Button>
         </div>
+        {/* 导入迁移包(.zip):在当前账号下完整重建一卷故事 */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".zip"
+          className="hidden"
+          onChange={(ev) => {
+            const f = ev.target.files?.[0];
+            ev.target.value = ""; // 允许重复选同一文件
+            if (f) onImport(f);
+          }}
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line-strong px-3 py-1.5 text-[12px] text-ink-faint transition hover:border-accent hover:text-accent-ink"
+          title="导入迁移包(.zip):从别的账号/部署导出的整卷故事"
+        >
+          <span className="text-accent">⎘</span> 导入迁移包
+        </button>
       </div>
 
       {/* 用户栏:点击展开菜单(设置 / 退出登录) */}

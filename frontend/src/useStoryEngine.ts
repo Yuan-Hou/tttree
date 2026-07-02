@@ -251,6 +251,16 @@ export function useStoryEngine() {
     [refreshStories, selectStory],
   );
 
+  // 导入迁移包(.zip)→ 在当前账号下重建为新故事 → 刷新书架并切到它。
+  const importBundle = useCallback(
+    async (file: File) => {
+      const s = await api.importBundle(file);
+      await refreshStories();
+      selectStory(s.id);
+    },
+    [refreshStories, selectStory],
+  );
+
   // 随时手动改标题:乐观更新当前标题 + 刷新书架(标题只是档案标记,不影响故事/不喂 agent)。
   const renameStory = useCallback(
     async (newTitle: string) => {
@@ -596,6 +606,19 @@ export function useStoryEngine() {
     [],
   );
 
+  // 编辑某轮 LLM 最终成稿:落盘(纯文本覆盖,后端不重跑/不重算黑板)→ 就地更新阅读列。
+  // 因 history 从各轮 narrative 重建,编辑后自然进入其后所有轮的上下文。
+  const editNarrative = useCallback(
+    async (turnIndex: number, narrative: string) => {
+      const id = curRef.current;
+      if (!id) return;
+      await api.editNarrative(id, turnIndex, narrative);
+      setTurns((ts) => ts.map((t) => (t.turn_index === turnIndex ? { ...t, narrative } : t)));
+      setContextsVersion((v) => v + 1); // 工作台显微镜重取 → writer 输出即编辑后的成稿
+    },
+    [],
+  );
+
   const bumpAll = () => {
     setContextsVersion((v) => v + 1);
     setDrawsVersion((v) => v + 1);
@@ -797,13 +820,13 @@ export function useStoryEngine() {
 
   return {
     stories, curId, title, blackboard, turns, scenesImages, scenesDrafts, supersededImages, proposals, drafts, pending, turnStreaming, options, busy, recovering, activeDraws,
-    refreshStories, selectStory, createStory, removeStory, renameStory, submitTurn,
+    refreshStories, selectStory, createStory, importBundle, removeStory, renameStory, submitTurn,
     openDraft, openDraftForProposal, generateDraft, editDraftInstruction, editDraftPrompt, setDraftRefs, dropDraft, confirmDraft, decideDraft, substituteDraft, startDraftFromProposal,
     // 工作台 + 时间控制
     scopeOpen, scopeTurn, setScopeTurn, openScope, closeScope,
     liveStages, liveTurn, liveOutputs, retrying, latestTurn, contextsVersion, drawsVersion, liveError, dismissFailure,
     writingIds, generatingIds, onWriting, onGenerating,
-    doRollback, doRetry, doFork, saveStepContext, reloadScope,
+    doRollback, doRetry, doFork, saveStepContext, editNarrative, reloadScope,
     // 故事内设置
     settingsOpen, settingsSection, openSettings, closeSettings,
   };

@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import brand_title
 from app.db.models import Story
 from app.storage import abs_from_rel
+from app.stories.migrate import export_bundle
 from app.web.deps import get_session
 from app.web.scene_map_router import get_scene_map
 from app.web.turn_router import get_snapshot
@@ -143,5 +144,25 @@ async def export_story(
         html,
         headers={
             "Content-Disposition": f"attachment; filename=\"story.html\"; filename*=UTF-8''{quote(filename)}",
+        },
+    )
+
+
+@router.post("/{story_id}/export-bundle")
+async def export_story_bundle(
+    story_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """迁移包导出:把整故事(8 张表 + 图片二进制)打成单个 .zip(内含多个 parquet)。
+    用于完整迁移到另一账号 / 另一部署实例(配 POST /stories/import-bundle)。"""
+    try:
+        data, filename = await export_bundle(session, story_id)
+    except KeyError:
+        raise HTTPException(404, "story not found")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"bundle.zip\"; filename*=UTF-8''{quote(filename)}",
         },
     )

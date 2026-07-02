@@ -71,6 +71,27 @@ export const exportStory = async (
   return { blob, filename };
 };
 
+/** 迁移包导出:整故事(各表 + 图片二进制)打成单个 .zip(内含多个 parquet),用于跨账号/跨部署完整迁移。 */
+export const exportBundle = async (id: string): Promise<{ blob: Blob; filename: string }> => {
+  const r = await fetch(`/story/${id}/export-bundle`, { method: "POST" });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  const blob = await r.blob();
+  const cd = r.headers.get("Content-Disposition") || "";
+  const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  const filename = m ? decodeURIComponent(m[1]) : "bundle.vtree.zip";
+  return { blob, filename };
+};
+
+/** 迁移包导入:上传 .zip → 在当前账号下完整重建为一卷新故事,返回新故事信息。 */
+export const importBundle = (file: File): Promise<StoryInfo> => {
+  const fd = new FormData();
+  fd.append("file", file);
+  return fetch(`/stories/import-bundle`, { method: "POST", body: fd }).then(async (r) => {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json() as Promise<StoryInfo>;
+  });
+};
+
 // ── 时间控制 + 节点上下文(M5-B)──
 export const getTurnContexts = (id: string, turnIndex: number) =>
   jget<TurnContexts>(`/story/${id}/turn/${turnIndex}/contexts`);
@@ -171,6 +192,18 @@ export const saveStepContext = (
   }).then(async (r) => {
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     return r.json();
+  });
+
+/** 直接改写某轮 LLM 最终成稿(narrative)。纯文本覆盖,后端不重跑 agent/不重算黑板;
+ *  因 history 每回合从各轮 narrative 重建,编辑后自然进入其后所有轮传给 LLM 的上下文。 */
+export const editNarrative = (id: string, turnIndex: number, narrative: string) =>
+  fetch(`/story/${id}/turn/${turnIndex}/narrative`, {
+    method: "PATCH",
+    headers: json,
+    body: JSON.stringify({ narrative }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json() as Promise<{ ok: boolean; turn_index: number }>;
   });
 
 export const rollback = (id: string) =>

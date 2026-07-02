@@ -90,6 +90,32 @@ async def put_step_context(
     return {"ok": True, "turn_index": turn_index, "step": step, "count": len(req.messages)}
 
 
+class EditNarrativeReq(BaseModel):
+    narrative: str
+
+
+@router.patch("/{story_id}/turn/{turn_index}/narrative")
+async def edit_turn_narrative(
+    story_id: str, turn_index: int, req: EditNarrativeReq,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """直接改写某轮 LLM 最终成稿(Turn.narrative)。纯文本覆盖:不重跑任何 agent、不重算黑板。
+
+    history 每回合从各轮 narrative 重建(见 turn_router._load_history),故编辑后**自然进入其后
+    所有轮传给 LLM 的上下文**,无需重走三段式。本轮黑板仍是当初据原文推出的(要让世界状态随之
+    变化,请用「重试」)。任意已落盘轮可编辑;进行中/失败的占位轮无 turn_index、不入此路径。"""
+    turn = (
+        await session.execute(
+            select(Turn).where(Turn.story_id == story_id, Turn.turn_index == turn_index)
+        )
+    ).scalar_one_or_none()
+    if turn is None:
+        raise HTTPException(404, "turn not found")
+    turn.narrative = req.narrative
+    await session.commit()
+    return {"ok": True, "turn_index": turn_index}
+
+
 @router.get("/{story_id}/turn/{turn_index}/draws")
 async def get_turn_draws(
     story_id: str, turn_index: int, session: AsyncSession = Depends(get_session)

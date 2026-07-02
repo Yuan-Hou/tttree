@@ -5,6 +5,7 @@ import json
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from app.db.models import Blackboard, DrawProposal, ImageGen, Turn
 from app.db.session import create_all, make_engine, make_session_factory
@@ -120,6 +121,35 @@ async def test_edit_step_context_latest_only_and_isolated(ctx):
     assert (await c.put(f"/story/{sid}/turn/1/contexts/writer", json={"messages": new_msgs})).status_code == 409
     # 非法 step
     assert (await c.put(f"/story/{sid}/turn/2/contexts/reducer", json={"messages": []})).status_code == 400
+
+
+async def test_edit_narrative_any_turn_and_flows_to_history(ctx):
+    """编辑任意已落盘轮的成稿 → 落盘且 narrative(= history assistant + 显微镜 writer 输出)更新;
+    历史轮也可改(不限最新);缺失轮 404。"""
+    c, Session = ctx
+    async with Session() as s:
+        sid = (await create_story(s, title="T")).id
+    await _add_turn(Session, sid, 1, bb=_bb({}), narrative="原始第一段")
+    await _add_turn(Session, sid, 2, bb=_bb({}), narrative="原始第二段")
+
+    # 改历史轮(1,非最新)——证明「所有已落盘轮可编辑」
+    r = await c.patch(f"/story/{sid}/turn/1/narrative", json={"narrative": "改写后的第一段"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "turn_index": 1}
+
+    # narrative 已落盘:DB 行 + 显微镜 writer 输出都变;后续 history 由 _load_history 从此重建
+    async with Session() as s:
+        row = (
+            await s.execute(select(Turn).where(Turn.story_id == sid, Turn.turn_index == 1))
+        ).scalar_one()
+        assert row.narrative == "改写后的第一段"
+    ctxs = (await c.get(f"/story/{sid}/turn/1/contexts")).json()
+    assert ctxs["writer"]["output"] == "改写后的第一段"
+    # 第2轮不受影响
+    assert (await c.get(f"/story/{sid}/turn/2/contexts")).json()["writer"]["output"] == "原始第二段"
+
+    # 缺失轮 404
+    assert (await c.patch(f"/story/{sid}/turn/9/narrative", json={"narrative": "x"})).status_code == 404
 
 
 async def test_turn_draws_from_proposal_table_same_source(ctx):

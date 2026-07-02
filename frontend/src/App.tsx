@@ -33,6 +33,7 @@ export function App() {
   const [mapOpen, setMapOpen] = useState(true); // 竖屏:地图可折叠
   const [shelfOverlay, setShelfOverlay] = useState(false); // 竖屏:书架抽屉
   const [exporting, setExporting] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false); // 导出形式下拉(HTML / 迁移包)
   const [accountOpen, setAccountOpen] = useState(false); // 账户设置覆盖层(从书架用户菜单进)
   const [username, setUsername] = useState(getName() ?? getUid() ?? "?"); // 改昵称后即时刷新书架页脚
   const brand = useBrandTitle();
@@ -43,24 +44,62 @@ export function App() {
     if (window.confirm("退出登录?")) logout();
   };
 
-  // 导出整卷故事为单文件 HTML(只读浏览版)→ 触发下载。
+  const triggerDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // 导出整卷故事为单文件 HTML(只读浏览版,便于分享)→ 触发下载。
   const doExport = useCallback(async () => {
     if (!e.curId || exporting) return;
+    setExportOpen(false);
     setExporting(true);
     try {
       // 带上当前地图节点布局(用户在前端整理好的位置)→ 导出版首开即按此落位。
       const layout = loadPositions(`${e.curId}.map`);
       const { blob, filename } = await api.exportStory(e.curId, layout);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      triggerDownload(blob, filename);
     } catch (err) {
       showToast(`导出失败:${String(err)}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [e.curId, exporting, showToast]);
+
+  // 导入迁移包(.zip)→ 在当前账号下重建为新故事并切过去。
+  const [importing, setImporting] = useState(false);
+  const doImport = useCallback(
+    async (file: File) => {
+      if (importing) return;
+      setImporting(true);
+      try {
+        await e.importBundle(file);
+        showToast("迁移包已导入,已切到新故事");
+      } catch (err) {
+        showToast(`导入失败:${String(err)}`);
+      } finally {
+        setImporting(false);
+      }
+    },
+    [importing, e.importBundle, showToast],
+  );
+
+  // 导出迁移包(.zip,含全部数据+图片,便于跨账号/跨部署迁移)→ 触发下载。
+  const doExportBundle = useCallback(async () => {
+    if (!e.curId || exporting) return;
+    setExportOpen(false);
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.exportBundle(e.curId);
+      triggerDownload(blob, filename);
+    } catch (err) {
+      showToast(`迁移包导出失败:${String(err)}`);
     } finally {
       setExporting(false);
     }
@@ -148,6 +187,7 @@ export function App() {
               curId={e.curId}
               onSelect={e.selectStory}
               onCreate={e.createStory}
+              onImport={doImport}
               onDelete={e.removeStory}
               onCollapse={layout.toggleCollapsed}
               username={username}
@@ -184,14 +224,42 @@ export function App() {
                 <span className="hidden shrink-0 font-mono text-[11px] text-ink-faint sm:inline">
                   {chapters ? `${chapters} 拍已写就` : "尚未落笔"}
                 </span>
-                <button
-                  onClick={doExport}
-                  disabled={exporting}
-                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-ink-soft transition hover:border-accent hover:text-accent-ink disabled:opacity-50"
-                  title="把对话流 + 场景地图导出成单文件 HTML(只读浏览版,可分享)"
-                >
-                  <span className="text-accent">⬇</span> {exporting ? "导出中…" : "导出"}
-                </button>
+                <div className="relative shrink-0">
+                  <button
+                    onClick={() => setExportOpen((v) => !v)}
+                    disabled={exporting}
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-ink-soft transition hover:border-accent hover:text-accent-ink disabled:opacity-50"
+                    title="导出故事:分享用 HTML / 迁移用 .zip"
+                  >
+                    <span className="text-accent">⬇</span> {exporting ? "导出中…" : "导出"}
+                    <span className="font-mono text-[10px] text-ink-faint">⌄</span>
+                  </button>
+                  {exportOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
+                      <div className="absolute right-0 top-full z-20 mt-1 w-60 overflow-hidden rounded-lg border border-line-strong bg-paper shadow-[0_12px_30px_-12px_rgba(28,37,48,0.4)]">
+                        <button
+                          onClick={doExport}
+                          className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition hover:bg-sunken"
+                        >
+                          <span className="flex items-center gap-1.5 text-[13px] text-ink">
+                            <span className="text-accent">⬇</span> HTML 单文件
+                          </span>
+                          <span className="pl-5 text-[11px] text-ink-faint">只读浏览版,便于分享</span>
+                        </button>
+                        <button
+                          onClick={doExportBundle}
+                          className="flex w-full flex-col items-start gap-0.5 border-t border-line px-3 py-2 text-left transition hover:bg-sunken"
+                        >
+                          <span className="flex items-center gap-1.5 text-[13px] text-ink">
+                            <span className="text-accent">⎘</span> 迁移包 .zip
+                          </span>
+                          <span className="pl-5 text-[11px] text-ink-faint">全部数据+图片,便于迁移到别处</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
                 <button
                   onClick={e.openScope}
                   className="relative flex shrink-0 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-ink-soft transition hover:border-accent hover:text-accent-ink"
@@ -218,7 +286,7 @@ export function App() {
 
         {e.curId ? (
           <>
-            <ReadingColumn turns={e.turns} onTurnClick={focusTurnOnMap} onDismissFailure={e.dismissFailure} />
+            <ReadingColumn turns={e.turns} onTurnClick={focusTurnOnMap} onDismissFailure={e.dismissFailure} onEditNarrative={e.editNarrative} editBusy={e.turnStreaming || !!e.retrying || e.recovering != null} />
             {(e.recovering || e.activeDraws > 0) && (
               <div className="mx-auto w-full max-w-[640px] px-10 pt-2">
                 <div className="flex items-center gap-2 rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-[12.5px] text-accent-ink">
@@ -377,6 +445,7 @@ export function App() {
                 setShelfOverlay(false);
               }}
               onCreate={e.createStory}
+              onImport={doImport}
               onDelete={e.removeStory}
               onCollapse={() => setShelfOverlay(false)}
               username={username}

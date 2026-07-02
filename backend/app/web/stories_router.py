@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.stories.migrate import import_bundle
 from app.stories.store import (
     StoryInfo,
     create_story,
@@ -50,6 +51,23 @@ async def api_create_story(
         last_active_at=story.last_active_at.isoformat(),
         turn_count=0,
     )
+
+
+@router.post("/import-bundle", response_model=StoryResp)
+async def api_import_bundle(
+    file: UploadFile = File(...),
+    uid: str = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> StoryResp:
+    """迁移包导入:上传 .zip(由 POST /story/{id}/export-bundle 产出)→ 在当前账号下完整重建
+    为一卷新故事(新 id + 重映射跨表引用 + 图片字节落盘),出现在书架。"""
+    data = await file.read()
+    try:
+        story = await import_bundle(session, uid, data)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    infos = {i.id: i for i in await list_stories(session, uid)}
+    return StoryResp.of(infos[story.id])
 
 
 @router.get("", response_model=list[StoryResp])

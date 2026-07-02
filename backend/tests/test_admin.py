@@ -60,6 +60,24 @@ async def test_list_users_no_secrets(tmp_path, monkeypatch):
         assert all("password" not in r and "password_hash" not in r for r in rows)
 
 
+async def test_list_users_shows_newapi_proxy_username(tmp_path, monkeypatch):
+    _setup(monkeypatch)
+    async with await _client(tmp_path, monkeypatch) as c:
+        from app.db.models import NewApiAccount
+        from app.db.session import async_session
+
+        async with async_session() as s:  # 只给 bob 建 new-api 子账号,admin 不建
+            s.add(NewApiAccount(user_id="2", newapi_user_id=42, username="brand_2_ab12cd",
+                                password="x", token_id=7, api_key="sk-x"))
+            await s.commit()
+
+        rows = (await c.get("/admin/users", headers=_h("1"))).json()
+        by_name = {r["name"]: r for r in rows}
+        assert by_name["bob"]["newapi_username"] == "brand_2_ab12cd"  # 有账号 → 显示代理名
+        assert by_name["admin"]["newapi_username"] is None            # 无账号 → None
+        assert all("password" not in r and "api_key" not in r for r in rows)
+
+
 async def test_create_user_then_login(tmp_path, monkeypatch):
     _setup(monkeypatch)
     async with await _client(tmp_path, monkeypatch) as c:

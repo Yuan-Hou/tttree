@@ -8,9 +8,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import users as users_mod
+from app.db.models import NewApiAccount
 from app.web.auth_deps import get_current_user, require_admin
 from app.web.deps import get_session
 
@@ -23,6 +25,8 @@ class UserOut(BaseModel):
     is_admin: bool
     banned: bool
     created_at: datetime | None = None
+    # 该用户在 new-api(API 平台)上的子账号登录名;尚未补齐(未首次登录/建号失败)则为 None。
+    newapi_username: str | None = None
 
 
 class CreateUserReq(BaseModel):
@@ -39,13 +43,18 @@ class SetPasswordReq(BaseModel):
     new_password: str = Field(min_length=1, max_length=128)
 
 
-def _out(u: users_mod.User) -> UserOut:
-    return UserOut(id=u.id, name=u.name, is_admin=u.is_admin, banned=u.banned)
+def _out(u: users_mod.User, newapi_username: str | None = None) -> UserOut:
+    return UserOut(
+        id=u.id, name=u.name, is_admin=u.is_admin, banned=u.banned,
+        newapi_username=newapi_username,
+    )
 
 
 @router.get("/users", response_model=list[UserOut])
-async def list_users() -> list[UserOut]:
-    return [_out(u) for u in users_mod.list_users()]
+async def list_users(session: AsyncSession = Depends(get_session)) -> list[UserOut]:
+    rows = (await session.execute(select(NewApiAccount))).scalars().all()
+    proxy_names = {r.user_id: r.username for r in rows}
+    return [_out(u, proxy_names.get(u.id)) for u in users_mod.list_users()]
 
 
 @router.post("/users", response_model=UserOut, status_code=201)

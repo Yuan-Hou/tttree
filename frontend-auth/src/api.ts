@@ -14,6 +14,7 @@ export interface AdminUser {
   is_admin: boolean;
   banned: boolean;
   created_at?: string | null;
+  newapi_username?: string | null; // API 平台(new-api)上的代理子账号登录名;未补齐则 null
 }
 
 async function detail(r: Response): Promise<string> {

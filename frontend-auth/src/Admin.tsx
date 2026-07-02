@@ -125,6 +125,7 @@ export function Admin({
             <tr>
               <th style={S.th}>ID</th>
               <th style={S.th}>用户名</th>
+              <th style={S.th}>代理用户名</th>
               <th style={S.th}>角色</th>
               <th style={S.th}>状态</th>
               <th style={{ ...S.th, textAlign: "right" }}>操作</th>
@@ -155,6 +156,15 @@ export function Admin({
                       </span>
                     ) : (
                       <span style={{ fontWeight: 500 }}>{u.name}</span>
+                    )}
+                  </td>
+                  <td style={S.td}>
+                    {u.newapi_username ? (
+                      <span style={S.mono}>{u.newapi_username}</span>
+                    ) : (
+                      <span style={S.muted} title="尚未补齐(用户首次登录时自动建号)">
+                        —
+                      </span>
                     )}
                   </td>
                   <td style={S.td}>{u.is_admin ? "管理员" : "用户"}</td>
@@ -259,6 +269,8 @@ const S: Record<string, CSSProperties> = {
     borderBottom: "1px solid #eef0f2",
   },
   td: { fontSize: 13.5, color: "#1c2530", padding: "10px 12px", borderBottom: "1px solid #f1f2f4" },
+  mono: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5, color: "#4a5560" },
+  muted: { color: "#a7adb5" },
   ok: { fontSize: 12, color: "#2f8a4e" },
   banned: { fontSize: 12, color: "#b4413c", fontWeight: 600 },
   mini: {
